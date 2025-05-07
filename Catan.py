@@ -46,6 +46,13 @@ DEV_CARD_OPTIONS = [
     ("Victory Point", ("Victory", "Point"))
 ]
 
+BUILD_COSTS = {
+    'road': {"wood": 1, "brick": 1},
+    'settle': {"wood": 1, "brick": 1, "sheep": 1, "wheat": 1},
+    'upgrade': {"ore": 3, "wheat": 2},
+    'buy': {"ore": 1, "sheep": 1, "wheat": 1}
+}
+
 class Resource(Enum):
     """Enum for resource types on tiles."""
     WOOD = auto()
@@ -219,6 +226,8 @@ class Game:
         self.title_font = pygame.font.SysFont(None, 28)
         self.init_ui()
         self.setup_players()
+        self.phase = 'setup'  # Track whether in initial placement or regular game
+        self.robber_tile_index = None  # Track robber location
 
     def init_ui(self):
         """Define rectangles for UI buttons."""
@@ -231,6 +240,89 @@ class Game:
         for n,x,y,w,h in btns:
             self.btn_rect[n] = pygame.Rect(x, y, w, h)
 
+    def is_valid_settlement(self, player, node_index):
+        # TODO: Add logic to prevent building next to existing settlements
+        # and require road connection after setup phase
+        return True
+
+    def is_valid_road(self, player, edge_index):
+        # TODO: Ensure road is connected to existing player structures
+        return True
+
+    def can_afford(self, player, build_type):
+        for res, cost in BUILD_COSTS[build_type].items():
+            if player.resources[res] < cost:
+                return False
+        return True
+
+    def pay_cost(self, player, build_type):
+        for res, cost in BUILD_COSTS[build_type].items():
+            player.resources[res] -= cost
+
+    def distribute_resources(self):
+        for tile in self.board.tiles:
+            if tile.number == self.dice_result:
+                for node_index in self.get_adjacent_nodes(tile):
+                    for p in self.players:
+                        if p.node_states[node_index] == "settlement":
+                            p.resources[tile.resource.name.lower()] += 1
+                        elif p.node_states[node_index] == "city":
+                            p.resources[tile.resource.name.lower()] += 2
+
+    def handle_roll(self):
+        self.dice_result = random.randint(1, 6) + random.randint(1, 6)
+        if self.dice_result == 7:
+            self.handle_robber()
+        else:
+            self.distribute_resources()
+
+    def handle_robber(self):
+        # TODO: Implement discard logic and robber placement
+        print("[Robber] Rolled 7: implement discard and move robber")
+
+    def play_card(self, lbl):
+        # Existing dev card logic...
+        if lbl == "Year of Plenty":
+            # TODO: Let player choose 2 resources
+            pass
+        elif lbl == "Monopoly":
+            # TODO: Take all of chosen resource from others
+            pass
+        elif lbl == "Road Building":
+            # TODO: Place 2 free roads
+            pass
+        elif lbl == "Knight":
+            self.handle_robber()
+
+    def check_win(self):
+        for p in self.players:
+            if p.victory_points >= WINNING_VICTORY_POINTS:
+                print(f"[Game Over] {self.current_player().name} wins!")
+                pygame.quit()
+                sys.exit()
+
+    def place_piece(self, pt):
+        # TODO: Wrap this with can_afford + is_valid_*
+        # and deduct resources with pay_cost
+        pass
+
+    def next_turn(self):
+        self.current_turn += 1
+        self.handle_roll()
+        self.check_win()
+
+    def trade_with_bank(self, player, give_res, get_res):
+        if player.resources[give_res] >= 4:
+            player.resources[give_res] -= 4
+            player.resources[get_res] += 1
+
+    def get_adjacent_nodes(self, tile):
+        # TODO: Implement: return node indices adjacent to a given tile
+        return []
+
+    def is_active_player(self, player_id):
+        return player_id == (self.current_turn % self.num_players)
+
     def setup_players(self):
         """Assign names, colors, and initialize state arrays for each player."""
         names = random.sample(NAMES, self.num_players)
@@ -242,7 +334,7 @@ class Game:
     def next_turn(self):
         """Advance turn counter and log."""
         self.current_turn += 1
-        print(f"[Turn {self.current_turn}] New turn started")
+        print(f"[Turn {self.current_turn}] Player {self.current_player().name}'s turn")
 
     def clear_board(self):
         """Reset all placement states for each player."""
@@ -257,7 +349,7 @@ class Game:
         p = self.players[self.selected_player]
         card = random.choice([lbl for lbl,_ in DEV_CARD_OPTIONS])
         p.dev_cards[card].append(self.current_turn)
-        print(f"[Turn {self.current_turn}] Player {p.name} bought {card}")
+        print(f"[Turn {self.current_turn}] {self.current_player().name} bought {card}")
 
     def play_card(self, lbl):
         """Play a bought dev card if eligible and log."""
@@ -265,7 +357,7 @@ class Game:
         for t in p.dev_cards[lbl]:
             if t < self.current_turn:
                 p.dev_cards[lbl].remove(t)
-                print(f"[Turn {self.current_turn}] Player {p.name} played {lbl}")
+                print(f"[Turn {self.current_turn}] {self.current_player().name} played {lbl}")
                 break
 
     def place_piece(self, pt):
@@ -277,20 +369,20 @@ class Game:
             if p.edge_states[idx] == "empty":
                 p.edge_states[idx] = "road"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] Player {p.name} built road at edge {idx}")
+                print(f"[Turn {self.current_turn}] {self.current_player().name} built road at edge {idx}")
         elif self.build_mode == 'settle':
             idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0]-self.pos_nodes[i][0], pt[1]-self.pos_nodes[i][1]))
             if p.node_states[idx] == "empty":
                 p.node_states[idx] = "settlement"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] Player {p.name} built settlement at node {idx}")
+                print(f"[Turn {self.current_turn}] {self.current_player().name} built settlement at node {idx}")
         elif self.build_mode == 'upgrade':
             # Upgrade first settlement found
             for i,state in enumerate(p.node_states):
                 if state == "settlement":
                     p.node_states[i] = "city"
                     p.update_stats()
-                    print(f"[Turn {self.current_turn}] Player {p.name} upgraded settlement to city at node {i}")
+                    print(f"[Turn {self.current_turn}] {self.current_player().name} upgraded settlement to city at node {i}")
                     break
 
     def draw_player_stats(self):
@@ -367,6 +459,9 @@ class Game:
                 x,y=self.pos_nodes[i]
                 if st=='settlement': pygame.draw.circle(self.screen,p.color,(int(x),int(y)),10)
                 elif st=='city': pygame.draw.rect(self.screen,p.color,pygame.Rect(x-10,y-10,20,20))
+
+    def current_player(self):
+        return self.players[self.current_turn % self.num_players]
 
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
