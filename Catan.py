@@ -334,7 +334,8 @@ class Game:
     def next_turn(self):
         """Advance turn counter and log."""
         self.current_turn += 1
-        print(f"[Turn {self.current_turn}] Player {self.current_player().name}'s turn")
+        r, t = self.get_round_and_turn()
+        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Player {self.current_player().name}'s turn")
 
     def clear_board(self):
         """Reset all placement states for each player."""
@@ -349,7 +350,8 @@ class Game:
         p = self.players[self.selected_player]
         card = random.choice([lbl for lbl,_ in DEV_CARD_OPTIONS])
         p.dev_cards[card].append(self.current_turn)
-        print(f"[Turn {self.current_turn}] {self.current_player().name} bought {card}")
+        r, t = self.get_round_and_turn()
+        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} bought {card}")
 
     def play_card(self, lbl):
         """Play a bought dev card if eligible and log."""
@@ -357,7 +359,8 @@ class Game:
         for t in p.dev_cards[lbl]:
             if t < self.current_turn:
                 p.dev_cards[lbl].remove(t)
-                print(f"[Turn {self.current_turn}] {self.current_player().name} played {lbl}")
+                r, t = self.get_round_and_turn()
+                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} played {lbl}")
                 break
 
     def place_piece(self, pt):
@@ -369,20 +372,23 @@ class Game:
             if p.edge_states[idx] == "empty":
                 p.edge_states[idx] = "road"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] {self.current_player().name} built road at edge {idx}")
+                r, t = self.get_round_and_turn()
+                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} built road at edge {idx}")
         elif self.build_mode == 'settle':
             idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0]-self.pos_nodes[i][0], pt[1]-self.pos_nodes[i][1]))
             if p.node_states[idx] == "empty":
                 p.node_states[idx] = "settlement"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] {self.current_player().name} built settlement at node {idx}")
+                r, t = self.get_round_and_turn()
+                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} built settlement at node {idx}")
         elif self.build_mode == 'upgrade':
             # Upgrade first settlement found
             for i,state in enumerate(p.node_states):
                 if state == "settlement":
                     p.node_states[i] = "city"
                     p.update_stats()
-                    print(f"[Turn {self.current_turn}] {self.current_player().name} upgraded settlement to city at node {i}")
+                    r, t = self.get_round_and_turn()
+                    print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} upgraded settlement to city at node {i}")
                     break
 
     def draw_player_stats(self):
@@ -462,6 +468,11 @@ class Game:
 
     def current_player(self):
         return self.players[self.current_turn % self.num_players]
+    
+    def get_round_and_turn(self):
+        round_num = (self.current_turn // self.num_players) + 1
+        turn_in_round = (self.current_turn % self.num_players) + 1
+        return round_num, turn_in_round
 
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
@@ -475,16 +486,28 @@ class Game:
                     if self.btn_rect['reshuffle'].collidepoint(pt):
                         self.board.generate_board(); self.board.compute_graph(); print("[Game] Board reshuffled")
                     elif self.btn_rect['clear'].collidepoint(pt): self.clear_board()
-                    elif self.btn_rect['road'].collidepoint(pt): self.build_mode='road'; print(f"[Turn {self.current_turn}] Mode: Road")
-                    elif self.btn_rect['settle'].collidepoint(pt): self.build_mode='settle'; print(f"[Turn {self.current_turn}] Mode: Settle")
-                    elif self.btn_rect['upgrade'].collidepoint(pt): self.build_mode='upgrade'; print(f"[Turn {self.current_turn}] Mode: Upgrade")
+                    elif self.btn_rect['road'].collidepoint(pt): 
+                        self.build_mode='road'
+                        r, t = self.get_round_and_turn()
+                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Road")
+                    elif self.btn_rect['settle'].collidepoint(pt): 
+                        self.build_mode='settle'
+                        r, t = self.get_round_and_turn()
+                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Settle")
+                    elif self.btn_rect['upgrade'].collidepoint(pt): 
+                        self.build_mode='upgrade'
+                        r, t = self.get_round_and_turn()
+                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Upgrade")
                     elif self.btn_rect['buy'].collidepoint(pt): self.buy()
                     elif self.btn_rect['dec'].collidepoint(pt) and self.num_players>self.min_players:
                         self.num_players-=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
                     elif self.btn_rect['inc'].collidepoint(pt) and self.num_players<self.max_players:
                         self.num_players+=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
                     elif self.roll_rect.collidepoint(pt) and self.roll_active:
-                        self.next_turn(); self.dice_result=random.randint(1,6)+random.randint(1,6); print(f"[Turn {self.current_turn}] Rolled {self.dice_result}")
+                        self.next_turn()
+                        self.dice_result=random.randint(1,6)+random.randint(1,6)
+                        r, t = self.get_round_and_turn()
+                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Rolled {self.dice_result}")
                     elif any(r.collidepoint(pt) for r in self.stats_rects):
                         for i,r in enumerate(self.stats_rects):
                             if r.collidepoint(pt): self.selected_player=i; print(f"[Game] Selected {self.players[i].name}"); break
@@ -492,7 +515,9 @@ class Game:
                         for lbl,(btn,play) in self.play_buttons.items():
                             if btn.collidepoint(pt):
                                 if play: self.play_card(lbl)
-                                else: print(f"[Turn {self.current_turn}] Cannot play {lbl} yet")
+                                else: 
+                                    r, t = self.get_round_and_turn()
+                                    print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Cannot play {lbl} yet")
                                 break
                     else:
                         self.place_piece(pt)
