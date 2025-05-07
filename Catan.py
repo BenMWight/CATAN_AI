@@ -19,6 +19,8 @@ COLOR_ACTIVE_BUTTON_BG = (255, 255, 255)  # Active button fill
 COLOR_ACTIVE_BUTTON_BORDER = (255, 0, 0)  # Active button border
 COLOR_PLAYABLE = (0, 200, 0)  # Playable dev card indicator
 COLOR_UNPLAYABLE = (150, 150, 150)  # Unplayable dev card indicator
+COLOR_CURRENT_TURN = (0, 255, 0)    # Bright green
+COLOR_NOT_TURN = (150, 150, 150)    # Grey
 # Resource-specific tile colors
 RESOURCE_COLORS = {
     'wood': (34, 139, 34),
@@ -211,6 +213,8 @@ class Game:
         self.min_players, self.max_players = 2, 5
         self.num_players = max(self.min_players, min(num_players, self.max_players))
         self.players = []
+        self.node_ownership = {}  # node_index -> player_id, 'settlement' or 'city'
+        self.edge_ownership = {}  # edge_index -> player_id
         self.selected_player = 0
         self.current_turn = 0
         # UI elements
@@ -334,8 +338,7 @@ class Game:
     def next_turn(self):
         """Advance turn counter and log."""
         self.current_turn += 1
-        r, t = self.get_round_and_turn()
-        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Player {self.current_player().name}'s turn")
+        print(f"{self.log_prefix()}'s turn")
 
     def clear_board(self):
         """Reset all placement states for each player."""
@@ -350,8 +353,7 @@ class Game:
         p = self.players[self.selected_player]
         card = random.choice([lbl for lbl,_ in DEV_CARD_OPTIONS])
         p.dev_cards[card].append(self.current_turn)
-        r, t = self.get_round_and_turn()
-        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} bought {card}")
+        print(f"{self.log_prefix()} bought {card}")
 
     def play_card(self, lbl):
         """Play a bought dev card if eligible and log."""
@@ -359,8 +361,7 @@ class Game:
         for t in p.dev_cards[lbl]:
             if t < self.current_turn:
                 p.dev_cards[lbl].remove(t)
-                r, t = self.get_round_and_turn()
-                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} played {lbl}")
+                print(f"{self.log_prefix()} played {lbl}")
                 break
 
     def place_piece(self, pt):
@@ -371,24 +372,38 @@ class Game:
             idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0]-self.pos_edges[i][0], pt[1]-self.pos_edges[i][1]))
             if p.edge_states[idx] == "empty":
                 p.edge_states[idx] = "road"
+                self.edge_ownership[idx] = (p.id, 'road')
                 p.update_stats()
-                r, t = self.get_round_and_turn()
-                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} built road at edge {idx}")
+                print(f"{self.log_prefix()} built road at edge {idx}")
         elif self.build_mode == 'settle':
-            idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0]-self.pos_nodes[i][0], pt[1]-self.pos_nodes[i][1]))
-            if p.node_states[idx] == "empty":
-                p.node_states[idx] = "settlement"
-                p.update_stats()
-                r, t = self.get_round_and_turn()
-                print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} built settlement at node {idx}")
+            idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
+            if self.node_ownership.get(idx):
+                print(f"{self.log_prefix()} cannot build: node {idx} already occupied")
+                return
+            p = self.players[self.selected_player]
+            # Optional: check for minimum distance (e.g., no adjacent settlements)
+            if not self.is_valid_settlement(p, idx):
+                print(f"{self.log_prefix()} invalid settlement location at node {idx}")
+                return
+            # Check and deduct resources only if not in setup phase
+            if self.phase != 'setup':
+                if not self.can_afford(p, 'settle'):
+                    print(f"{self.log_prefix()} cannot afford a settlement")
+                    return
+                self.pay_cost(p, 'settle')
+            # Place the settlement
+            p.node_states[idx] = "settlement"
+            self.node_ownership[idx] = (p.id, 'settlement')
+            p.update_stats()
+            print(f"{self.log_prefix()} built settlement at node {idx}")
         elif self.build_mode == 'upgrade':
             # Upgrade first settlement found
             for i,state in enumerate(p.node_states):
                 if state == "settlement":
                     p.node_states[i] = "city"
+                    self.node_ownership[i] = (p.id, 'city')
                     p.update_stats()
-                    r, t = self.get_round_and_turn()
-                    print(f"[Round {r} - Turn {t}] Player {self.current_player().name} {self.current_player().name} upgraded settlement to city at node {i}")
+                    print(f"{self.log_prefix()} upgraded settlement to city at node {i}")
                     break
 
     def draw_player_stats(self):
@@ -402,7 +417,11 @@ class Game:
             y = sy
             rect = pygame.Rect(x-5, y-5, bw, lh*6+10)
             pygame.draw.rect(self.screen, (255,255,255), rect)
-            pygame.draw.rect(self.screen, p.color, rect, 3)
+
+            if self.is_active_player(p.id):
+                pygame.draw.rect(self.screen, COLOR_CURRENT_TURN, rect, 3)
+            else:
+                pygame.draw.rect(self.screen, COLOR_NOT_TURN, rect, 3)
             self.stats_rects.append(rect)
             self.screen.blit(self.title_font.render(p.name, True, p.color), (x,y))
             stats = [
@@ -470,9 +489,18 @@ class Game:
         return self.players[self.current_turn % self.num_players]
     
     def get_round_and_turn(self):
-        round_num = (self.current_turn // self.num_players) + 1
-        turn_in_round = (self.current_turn % self.num_players) + 1
+        if self.phase == 'setup':
+            # Use current_turn directly, count from 0
+            round_num = 0
+            turn_in_round = (self.current_turn % self.num_players) + 1
+        else:
+            round_num = (self.current_turn // self.num_players) + 1
+            turn_in_round = (self.current_turn % self.num_players) + 1
         return round_num, turn_in_round
+    
+    def log_prefix(self):
+        r, t = self.get_round_and_turn()
+        return f"[Round {r} - Turn {t}] Player {self.current_player().name}"
 
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
@@ -488,16 +516,13 @@ class Game:
                     elif self.btn_rect['clear'].collidepoint(pt): self.clear_board()
                     elif self.btn_rect['road'].collidepoint(pt): 
                         self.build_mode='road'
-                        r, t = self.get_round_and_turn()
-                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Road")
+                        print(f"{self.log_prefix()} Mode: Road")
                     elif self.btn_rect['settle'].collidepoint(pt): 
                         self.build_mode='settle'
-                        r, t = self.get_round_and_turn()
-                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Settle")
+                        print(f"{self.log_prefix()} Mode: Settle")
                     elif self.btn_rect['upgrade'].collidepoint(pt): 
                         self.build_mode='upgrade'
-                        r, t = self.get_round_and_turn()
-                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Mode: Upgrade")
+                        print(f"{self.log_prefix()} Mode: Upgrade")
                     elif self.btn_rect['buy'].collidepoint(pt): self.buy()
                     elif self.btn_rect['dec'].collidepoint(pt) and self.num_players>self.min_players:
                         self.num_players-=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
@@ -506,8 +531,7 @@ class Game:
                     elif self.roll_rect.collidepoint(pt) and self.roll_active:
                         self.next_turn()
                         self.dice_result=random.randint(1,6)+random.randint(1,6)
-                        r, t = self.get_round_and_turn()
-                        print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Rolled {self.dice_result}")
+                        print(f"{self.log_prefix()} Rolled {self.dice_result}")
                     elif any(r.collidepoint(pt) for r in self.stats_rects):
                         for i,r in enumerate(self.stats_rects):
                             if r.collidepoint(pt): self.selected_player=i; print(f"[Game] Selected {self.players[i].name}"); break
@@ -516,8 +540,7 @@ class Game:
                             if btn.collidepoint(pt):
                                 if play: self.play_card(lbl)
                                 else: 
-                                    r, t = self.get_round_and_turn()
-                                    print(f"[Round {r} - Turn {t}] Player {self.current_player().name} Cannot play {lbl} yet")
+                                    print(f"{self.log_prefix()} Cannot play {lbl} yet")
                                 break
                     else:
                         self.place_piece(pt)
