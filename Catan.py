@@ -21,6 +21,7 @@ COLOR_PLAYABLE = (0, 200, 0)  # Playable dev card indicator
 COLOR_UNPLAYABLE = (150, 150, 150)  # Unplayable dev card indicator
 COLOR_CURRENT_TURN = (0, 255, 0)    # Bright green
 COLOR_NOT_TURN = (150, 150, 150)    # Grey
+COLOR_GHOST = (180, 180, 180)  # Light grey
 # Resource-specific tile colors
 RESOURCE_COLORS = {
     'wood': (34, 139, 34),
@@ -221,7 +222,7 @@ class Game:
         self.btn_rect = {}
         self.roll_rect = pygame.Rect(SCREEN_WIDTH-150, SCREEN_HEIGHT-60, 130, 50)
         self.play_buttons = {}
-        self.build_mode = 'road'
+        self.build_mode = None
         self.dice_result = None
         # Whether the roll dice button is active
         self.roll_active = True
@@ -484,6 +485,23 @@ class Game:
                 x,y=self.pos_nodes[i]
                 if st=='settlement': pygame.draw.circle(self.screen,p.color,(int(x),int(y)),10)
                 elif st=='city': pygame.draw.rect(self.screen,p.color,pygame.Rect(x-10,y-10,20,20))
+        # === Draw ghost previews ===
+        if self.build_mode in ['road', 'settle', 'upgrade']:
+            if self.build_mode == 'road':
+                for i, (x, y) in enumerate(self.pos_edges):
+                    if i not in self.edge_ownership:
+                        pygame.draw.line(self.screen, COLOR_GHOST, (x - 15, y), (x + 15, y), 4)
+
+            elif self.build_mode == 'settle':
+                for i, (x, y) in enumerate(self.pos_nodes):
+                    if i not in self.node_ownership:
+                        pygame.draw.circle(self.screen, COLOR_GHOST, (int(x), int(y)), 10)
+
+            elif self.build_mode == 'upgrade':
+                for i, (x, y) in enumerate(self.pos_nodes):
+                    p = self.players[self.selected_player]
+                    if p.node_states[i] == "settlement":
+                        pygame.draw.rect(self.screen, COLOR_GHOST, pygame.Rect(x - 10, y - 10, 20, 20))
 
     def current_player(self):
         return self.players[self.current_turn % self.num_players]
