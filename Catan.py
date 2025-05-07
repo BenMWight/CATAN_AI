@@ -4,22 +4,22 @@ import math
 import random
 from enum import Enum, auto
 
-# Constants
-SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 900
-HEX_RADIUS = 70
-BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-SNAP_THRESHOLD = 30  # pixel distance for snapping
+# --- Constants ---
+SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 900  # Window dimensions
+HEX_RADIUS = 70  # Radius of each hex tile
+BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # Center of the board
+SNAP_THRESHOLD = 30  # Pixel distance threshold for snapping clicks to nodes/edges
 
-# Colors
-COLOR_BG = (245, 222, 179)
-COLOR_LINE = (0, 0, 0)
-COLOR_BUTTON = (200, 200, 200)
-COLOR_BUTTON_TEXT = (0, 0, 0)
-COLOR_ACTIVE_BUTTON_BG = (255, 255, 255)
-COLOR_ACTIVE_BUTTON_BORDER = (255, 0, 0)
-COLOR_PLAYABLE = (0, 200, 0)
-COLOR_UNPLAYABLE = (150, 150, 150)
-
+# --- Colors ---
+COLOR_BG = (245, 222, 179)  # Background sand/beige
+COLOR_LINE = (0, 0, 0)  # Outline lines
+COLOR_BUTTON = (200, 200, 200)  # Button background
+COLOR_BUTTON_TEXT = (0, 0, 0)  # Button text
+COLOR_ACTIVE_BUTTON_BG = (255, 255, 255)  # Active button fill
+COLOR_ACTIVE_BUTTON_BORDER = (255, 0, 0)  # Active button border
+COLOR_PLAYABLE = (0, 200, 0)  # Playable dev card indicator
+COLOR_UNPLAYABLE = (150, 150, 150)  # Unplayable dev card indicator
+# Resource-specific tile colors
 RESOURCE_COLORS = {
     'wood': (34, 139, 34),
     'brick': (178, 34, 34),
@@ -29,15 +29,15 @@ RESOURCE_COLORS = {
     'desert': (210, 180, 140)
 }
 
-# Generic names for players
+# --- Preset data ---
+# Generic player names
 NAMES = [
     "Alex", "Jordan", "Taylor", "Morgan", "Casey",
     "Riley", "Jamie", "Cameron", "Drew", "Reese",
     "Quinn", "Avery", "Peyton", "Hayden", "Rowan",
     "Skyler", "Dakota", "Payton", "Finley", "Emerson"
 ]
-
-# Development card options
+# Development card types and labels
 DEV_CARD_OPTIONS = [
     ("Knight", ("Knight", "")),
     ("Road Building", ("Road", "Building")),
@@ -47,6 +47,7 @@ DEV_CARD_OPTIONS = [
 ]
 
 class Resource(Enum):
+    """Enum for resource types on tiles."""
     WOOD = auto()
     BRICK = auto()
     SHEEP = auto()
@@ -55,40 +56,59 @@ class Resource(Enum):
     DESERT = auto()
 
 class Tile:
-    def __init__(self, res, number, pos):
-        self.resource = res
-        self.number = number
-        self.position = pos
+    """
+    Represents a single hex tile on the board.
+    Stores resource type, number token, and center position.
+    """
+    def __init__(self, resource, number, position):
+        self.resource = resource  # Resource enum
+        self.number = number      # Dice number (None for desert)
+        self.position = position  # (x, y) center coordinates
 
     def draw(self, screen):
+        """
+        Draws the hex: fill with resource color, outline, and number.
+        """
         pts = []
+        # Compute six corners for flat-top hexagon
         for i in range(6):
-            ang = math.radians(60 * i - 30)
-            pts.append((
-                self.position[0] + HEX_RADIUS * math.cos(ang),
-                self.position[1] + HEX_RADIUS * math.sin(ang)
-            ))
-        pygame.draw.polygon(screen, RESOURCE_COLORS[self.resource.name.lower()], pts)
+            angle = math.radians(60 * i - 30)
+            x = self.position[0] + HEX_RADIUS * math.cos(angle)
+            y = self.position[1] + HEX_RADIUS * math.sin(angle)
+            pts.append((x, y))
+        # Draw filled polygon
+        color_key = self.resource.name.lower()
+        pygame.draw.polygon(screen, RESOURCE_COLORS[color_key], pts)
+        # Draw outline
         pygame.draw.polygon(screen, COLOR_LINE, pts, 2)
+        # Draw number token if present
         if self.number is not None:
             font = pygame.font.SysFont(None, 28)
             text = font.render(str(self.number), True, COLOR_BUTTON_TEXT)
             screen.blit(text, text.get_rect(center=self.position))
 
 class Board:
+    """
+    Manages the hex grid: generates tile layout, computes
+    graph nodes (for settlements) and edges (for roads).
+    """
     def __init__(self):
-        self.tiles = []
-        self.nodes = []
-        self.edges = []
+        self.tiles = []  # List of Tile objects
+        self.nodes = []  # Unique corner positions for settlements
+        self.edges = []  # Midpoints between corners for roads
         self.generate_board()
         self.compute_graph()
 
     def generate_board(self):
+        """
+        Randomly shuffles resources and number tokens,
+        then positions tiles in 5 rows: 3-4-5-4-3 layout.
+        """
         print("[Game] Board reshuffled")
         self.tiles.clear()
-        res_pool = ([Resource.WOOD] * 4 + [Resource.BRICK] * 3 +
-                    [Resource.SHEEP] * 4 + [Resource.WHEAT] * 4 +
-                    [Resource.ORE] * 3 + [Resource.DESERT])
+        # Prepare resource and number pools
+        res_pool = ([Resource.WOOD]*4 + [Resource.BRICK]*3 + [Resource.SHEEP]*4 +
+                    [Resource.WHEAT]*4 + [Resource.ORE]*3 + [Resource.DESERT])
         num_pool = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]
         random.shuffle(res_pool)
         random.shuffle(num_pool)
@@ -106,23 +126,30 @@ class Board:
                 idx += 1
 
     def draw(self, screen):
+        """Draws all hex tiles on provided screen."""
         for tile in self.tiles:
             tile.draw(screen)
 
     def compute_graph(self):
+        """
+        Builds lists of unique corner (node) and edge midpoint positions
+        used for settlement and road placement.
+        """
         self.nodes.clear()
         self.edges.clear()
         for tile in self.tiles:
+            # Compute 6 corner points
             corners = []
             for i in range(6):
                 ang = math.radians(60 * i - 30)
-                corners.append((
-                    tile.position[0] + HEX_RADIUS * math.cos(ang),
-                    tile.position[1] + HEX_RADIUS * math.sin(ang)
-                ))
+                pt = (tile.position[0] + HEX_RADIUS*math.cos(ang),
+                      tile.position[1] + HEX_RADIUS*math.sin(ang))
+                corners.append(pt)
+            # Add each corner if not duplicate
             for c in corners:
                 if all(math.hypot(c[0]-n[0], c[1]-n[1]) > 1 for n in self.nodes):
                     self.nodes.append(c)
+            # Add midpoints of each edge
             for i in range(6):
                 a, b = corners[i], corners[(i+1)%6]
                 mid = ((a[0]+b[0])/2, (a[1]+b[1])/2)
@@ -130,238 +157,242 @@ class Board:
                     self.edges.append(mid)
 
 class Player:
-    def __init__(self, idx, name, color):
+    """
+    Tracks a player's resources, dev cards,
+    and placement states (states arrays for nodes and edges).
+    """
+    def __init__(self, idx, name, color, node_count, edge_count):
         self.id = idx
         self.name = name
         self.color = color
+        # Resource counts
         self.resources = {r: 0 for r in Resource}
+        # Dev cards: mapping label -> list of turns bought
         self.dev_cards = {lbl: [] for lbl, _ in DEV_CARD_OPTIONS}
-        self.roads = []
-        self.settlements = []
-        self.cities = []
-        self.longest_road = 0
+        # State arrays: track placement at each graph index
+        self.node_states = ["empty"] * node_count  # 'empty','settlement','city'
+        self.edge_states = ["empty"] * edge_count  # 'empty','road'
+        # Derived stats
         self.victory_points = 0
+        self.longest_road = 0
 
     @property
     def card_count(self):
+        """Total resource cards in hand."""
         return sum(self.resources.values())
 
     def update_stats(self):
-        self.victory_points = len(self.settlements) + 2 * len(self.cities)
-        self.longest_road = len(self.roads)
+        """Recomputes victory points and longest road from state arrays."""
+        self.victory_points = self.node_states.count("settlement") + 2*self.node_states.count("city")
+        self.longest_road = self.edge_states.count("road")
 
 class Game:
+    """
+    Main game controller: initializes board and players,
+    handles input, updates state, and renders frames.
+    """
     def __init__(self, num_players=3):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Catan")
         self.clock = pygame.time.Clock()
+        # Board and graph positions
         self.board = Board()
+        self.pos_nodes = sorted(self.board.nodes, key=lambda p: (p[1], p[0]))
+        self.pos_edges = sorted(self.board.edges, key=lambda p: (p[1], p[0]))
+        # Player setup
         self.min_players, self.max_players = 2, 5
         self.num_players = max(self.min_players, min(num_players, self.max_players))
         self.players = []
         self.selected_player = 0
-        self.stats_rects = []
         self.current_turn = 0
-        self.setup_players()
+        # UI elements
+        self.btn_rect = {}
+        self.roll_rect = pygame.Rect(SCREEN_WIDTH-150, SCREEN_HEIGHT-60, 130, 50)
+        self.play_buttons = {}
+        self.build_mode = 'road'
+        self.dice_result = None
+        # Whether the roll dice button is active
+        self.roll_active = True
+        # Fonts
         self.font = pygame.font.SysFont(None, 24)
         self.title_font = pygame.font.SysFont(None, 28)
+        self.init_ui()
+        self.setup_players()
+
+    def init_ui(self):
+        """Define rectangles for UI buttons."""
         btns = [
-            ('reshuffle', 20, 20, 160, 40),
-            ('clear', 200, 20, 160, 40),
-            ('road', 380, 20, 120, 40),
-            ('settle', 510, 20, 120, 40),
-            ('upgrade', 640, 20, 120, 40),
-            ('buy', 770, 20, 120, 40),
-            ('dec', 900, 20, 40, 40),
-            ('inc', 950, 20, 40, 40)
+            ('reshuffle',20,20,160,40), ('clear',200,20,160,40),
+            ('road',380,20,120,40),    ('settle',510,20,120,40),
+            ('upgrade',640,20,120,40), ('buy',770,20,120,40),
+            ('dec',900,20,40,40),      ('inc',950,20,40,40)
         ]
-        self.btn_rect = {name: pygame.Rect(x, y, w, h) for name, x, y, w, h in btns}
-        self.roll_rect = pygame.Rect(SCREEN_WIDTH-150, SCREEN_HEIGHT-60, 130, 50)
-        self.roll_active = True
-        self.dice_result = None
-        self.build_mode = 'road'
-        # Initialize play buttons dict
-        self.play_buttons = {}
+        for n,x,y,w,h in btns:
+            self.btn_rect[n] = pygame.Rect(x, y, w, h)
 
     def setup_players(self):
+        """Assign names, colors, and initialize state arrays for each player."""
         names = random.sample(NAMES, self.num_players)
-        self.players = [Player(i, n, (random.randint(50,255), random.randint(50,255), random.randint(50,255))) for i, n in enumerate(names)]
+        for i,name in enumerate(names):
+            color = (random.randint(50,255), random.randint(50,255), random.randint(50,255))
+            p = Player(i, name, color, len(self.pos_nodes), len(self.pos_edges))
+            self.players.append(p)
 
     def next_turn(self):
+        """Advance turn counter and log."""
         self.current_turn += 1
-        print(f"[Turn {self.current_turn}] Starting turn")
+        print(f"[Turn {self.current_turn}] New turn started")
 
     def clear_board(self):
-        print("[Game] Board cleared")
+        """Reset all placement states for each player."""
         for p in self.players:
-            p.roads.clear()
-            p.settlements.clear()
-            p.cities.clear()
+            p.node_states = ["empty"]*len(self.pos_nodes)
+            p.edge_states = ["empty"]*len(self.pos_edges)
             p.update_stats()
+        print("[Game] Board cleared")
 
     def buy(self):
+        """Buy a random development card and log purchase."""
         p = self.players[self.selected_player]
-        card = random.choice([lbl for lbl, _ in DEV_CARD_OPTIONS])
+        card = random.choice([lbl for lbl,_ in DEV_CARD_OPTIONS])
         p.dev_cards[card].append(self.current_turn)
         print(f"[Turn {self.current_turn}] Player {p.name} bought {card}")
 
     def play_card(self, lbl):
+        """Play a bought dev card if eligible and log."""
         p = self.players[self.selected_player]
-        turns = p.dev_cards[lbl]
-        for t in turns:
+        for t in p.dev_cards[lbl]:
             if t < self.current_turn:
-                turns.remove(t)
+                p.dev_cards[lbl].remove(t)
                 print(f"[Turn {self.current_turn}] Player {p.name} played {lbl}")
                 break
 
     def place_piece(self, pt):
+        """Handle clicks to place roads, settlements, or upgrade to cities."""
         p = self.players[self.selected_player]
         if self.build_mode == 'road':
-            cand = min(self.board.edges, key=lambda e: math.hypot(pt[0]-e[0], pt[1]-e[1]))
-            dist = math.hypot(pt[0]-cand[0], pt[1]-cand[1])
-            if dist < SNAP_THRESHOLD and cand not in p.roads and (
-               not(p.roads or p.settlements or p.cities) or any(
-                   math.hypot(cand[0]-e[0], cand[1]-e[1]) < SNAP_THRESHOLD for e in p.roads + p.settlements + p.cities)):
-                p.roads.append(cand)
+            # Find closest edge index
+            idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0]-self.pos_edges[i][0], pt[1]-self.pos_edges[i][1]))
+            if p.edge_states[idx] == "empty":
+                p.edge_states[idx] = "road"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] Player {p.name} built Road at {cand}")
-            else:
-                print(f"[Turn {self.current_turn}] Road placement invalid")
+                print(f"[Turn {self.current_turn}] Player {p.name} built road at edge {idx}")
         elif self.build_mode == 'settle':
-            cand = min(self.board.nodes, key=lambda n: math.hypot(pt[0]-n[0], pt[1]-n[1]))
-            dist = math.hypot(pt[0]-cand[0], pt[1]-cand[1])
-            if dist < SNAP_THRESHOLD and cand not in p.settlements and cand not in p.cities:
-                p.settlements.append(cand)
+            idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0]-self.pos_nodes[i][0], pt[1]-self.pos_nodes[i][1]))
+            if p.node_states[idx] == "empty":
+                p.node_states[idx] = "settlement"
                 p.update_stats()
-                print(f"[Turn {self.current_turn}] Player {p.name} built Settlement at {cand}")
-            else:
-                print(f"[Turn {self.current_turn}] Settlement placement invalid")
+                print(f"[Turn {self.current_turn}] Player {p.name} built settlement at node {idx}")
         elif self.build_mode == 'upgrade':
-            if p.settlements:
-                cand = p.settlements.pop()
-                p.cities.append(cand)
-                p.update_stats()
-                print(f"[Turn {self.current_turn}] Player {p.name} upgraded to City at {cand}")
-            else:
-                print(f"[Turn {self.current_turn}] No settlement to upgrade")
-
-    def roll_dice(self):
-        self.next_turn()
-        self.dice_result = random.randint(1,6) + random.randint(1,6)
-        print(f"[Turn {self.current_turn}] Rolled dice: {self.dice_result}")
+            # Upgrade first settlement found
+            for i,state in enumerate(p.node_states):
+                if state == "settlement":
+                    p.node_states[i] = "city"
+                    p.update_stats()
+                    print(f"[Turn {self.current_turn}] Player {p.name} upgraded settlement to city at node {i}")
+                    break
 
     def draw_player_stats(self):
-        self.stats_rects.clear()
-        sx, sy = 20, 80
+        """Draw stats panels for all players at top of screen."""
+        self.stats_rects = []
+        sx, sy = 20, 80  # Starting x,y
         lh = self.font.get_height()
-        bw = 220
-        for i, p in enumerate(self.players):
-            x = sx + i*(bw+10)
+        bw = 220  # Panel width
+        for i,p in enumerate(self.players):
+            x = sx + i*(bw + 10)
             y = sy
             rect = pygame.Rect(x-5, y-5, bw, lh*6+10)
             pygame.draw.rect(self.screen, (255,255,255), rect)
             pygame.draw.rect(self.screen, p.color, rect, 3)
             self.stats_rects.append(rect)
-            self.screen.blit(self.title_font.render(p.name, True, p.color), (x, y))
-            stats = [f"VP: {p.victory_points}", f"Cards: {p.card_count}", f"LR: {p.longest_road}", f"R: {len(p.roads)}", f"C: {len(p.cities)}"]
-            for j, t in enumerate(stats, start=1):
-                self.screen.blit(self.font.render(t, True, COLOR_BUTTON_TEXT), (x+5, y+j*lh))
+            self.screen.blit(self.title_font.render(p.name, True, p.color), (x,y))
+            stats = [
+                f"VP: {p.victory_points}",
+                f"Cards: {p.card_count}",
+                f"LR: {p.longest_road}",
+                f"R: {p.edge_states.count('road')}",
+                f"S: {p.node_states.count('settlement')}"
+            ]
+            for j,t in enumerate(stats, start=1):
+                self.screen.blit(self.font.render(t,True,COLOR_BUTTON_TEXT),(x+5,y+j*lh))
 
     def draw_selected_info(self):
-        # Display selected player's resource and dev card info, with play buttons for all except Victory Point
-        if self.selected_player is None:
-            return
+        """Draw resources and dev card info for selected player with play buttons."""
         p = self.players[self.selected_player]
-        info_height = 100
-        y0 = SCREEN_HEIGHT - info_height
-        info_width = SCREEN_WIDTH - (self.roll_rect.width + 20)
-        pygame.draw.rect(self.screen, (220, 220, 220), (0, y0, info_width, info_height))
-
+        info_h = 100
+        y0 = SCREEN_HEIGHT - info_h
+        info_w = SCREEN_WIDTH - (self.roll_rect.width + 20)
+        pygame.draw.rect(self.screen, (220,220,220), (0,y0,info_w,info_h))
         lh = self.font.get_height()
-        y1, y2, y3 = y0 + 5, y0 + 5 + lh, y0 + 5 + 2 * lh
-
-        # Prepare slots: resources then all dev cards including Victory Point
-        slots = [r for r in Resource if r != Resource.DESERT] + [lbl for lbl, _ in DEV_CARD_OPTIONS]
-        spacing = info_width // (len(slots) + 1)
+        y1, y2, y3 = y0+5, y0+5+lh, y0+5+2*lh
+        slots = [r for r in Resource if r!=Resource.DESERT] + [lbl for lbl,_ in DEV_CARD_OPTIONS]
+        spacing = info_w//(len(slots)+1)
         x = spacing
-        # Reset play_buttons
         self.play_buttons.clear()
-
         for s in slots:
-            if isinstance(s, Resource):
-                # Resource name and count
-                name_str = s.name.title()
-                name_surf = self.font.render(name_str, True, COLOR_BUTTON_TEXT)
-                name_rect = name_surf.get_rect(center=(x, (y1 + y2) // 2))
-                self.screen.blit(name_surf, name_rect)
-                cnt = p.resources[s]
-                cnt_surf = self.font.render(str(cnt), True, COLOR_BUTTON_TEXT)
-                cnt_rect = cnt_surf.get_rect(center=(x, y3))
-                self.screen.blit(cnt_surf, cnt_rect)
+            if isinstance(s,Resource):
+                nm = s.name.title();
+                surf = self.font.render(nm,True,COLOR_BUTTON_TEXT)
+                self.screen.blit(surf,surf.get_rect(center=(x,(y1+y2)//2)))
+                ct = p.resources[s]
+                cts = self.font.render(str(ct),True,COLOR_BUTTON_TEXT)
+                self.screen.blit(cts,cts.get_rect(center=(x,y3)))
             else:
-                # Dev card lines
-                for lbl, lines in DEV_CARD_OPTIONS:
-                    if lbl == s:
-                        line_a, line_b = lines
-                        break
-                a_surf = self.font.render(line_a, True, COLOR_BUTTON_TEXT)
-                b_surf = self.font.render(line_b, True, COLOR_BUTTON_TEXT)
-                a_rect = a_surf.get_rect(center=(x, y1))
-                b_rect = b_surf.get_rect(center=(x, y2))
-                self.screen.blit(a_surf, a_rect)
-                self.screen.blit(b_surf, b_rect)
-                # Count
-                cnt = len(p.dev_cards[s])
-                cnt_surf = self.font.render(str(cnt), True, COLOR_BUTTON_TEXT)
-                cnt_rect = cnt_surf.get_rect(center=(x, y3))
-                self.screen.blit(cnt_surf, cnt_rect)
-                # Only show play button for non-Victory cards
-                if s != "Victory Point":
-                    btn_rect = pygame.Rect(cnt_rect.left, y3 + 5, cnt_rect.width, 20)
-                    playable = any(turn < self.current_turn for turn in p.dev_cards[s])
-                    color = COLOR_PLAYABLE if playable else COLOR_UNPLAYABLE
-                    pygame.draw.rect(self.screen, color, btn_rect, 2)
-                    self.play_buttons[s] = (btn_rect, playable)
-            x += spacing
+                for lbl,lines in DEV_CARD_OPTIONS:
+                    if lbl==s: la,lb=lines;break
+                a_s=self.font.render(la,True,COLOR_BUTTON_TEXT)
+                b_s=self.font.render(lb,True,COLOR_BUTTON_TEXT)
+                self.screen.blit(a_s,a_s.get_rect(center=(x,y1)))
+                self.screen.blit(b_s,b_s.get_rect(center=(x,y2)))
+                cv=len(p.dev_cards[s])
+                cvs=self.font.render(str(cv),True,COLOR_BUTTON_TEXT)
+                cr=cvs.get_rect(center=(x,y3));self.screen.blit(cvs,cr)
+                if s!="Victory Point":
+                    btn=pygame.Rect(cr.left,y3+5,cr.width,20)
+                    playable=any(t<self.current_turn for t in p.dev_cards[s])
+                    clr=COLOR_PLAYABLE if playable else COLOR_UNPLAYABLE
+                    pygame.draw.rect(self.screen,clr,btn,2)
+                    self.play_buttons[s]=(btn,playable)
+            x+=spacing
 
     def draw_placements(self):
+        """Render roads, settlements, and cities from state arrays."""
         for p in self.players:
-            for e in p.roads: pygame.draw.line(self.screen,p.color,(e[0]-15,e[1]),(e[0]+15,e[1]),4)
-            for n in p.settlements: pygame.draw.circle(self.screen,p.color,n,10)
-            for n in p.cities: pygame.draw.rect(self.screen,p.color,pygame.Rect(n[0]-10,n[1]-10,20,20))
+            for i,st in enumerate(p.edge_states):
+                if st=='road':
+                    x,y=self.pos_edges[i]
+                    pygame.draw.line(self.screen,p.color,(x-15,y),(x+15,y),4)
+            for i,st in enumerate(p.node_states):
+                x,y=self.pos_nodes[i]
+                if st=='settlement': pygame.draw.circle(self.screen,p.color,(int(x),int(y)),10)
+                elif st=='city': pygame.draw.rect(self.screen,p.color,pygame.Rect(x-10,y-10,20,20))
 
     def run(self):
+        """Main loop: handle events, update game, and render each frame."""
         running=True
         while running:
             for ev in pygame.event.get():
-                if ev.type==pygame.QUIT:
-                    running=False
+                if ev.type==pygame.QUIT: running=False
                 elif ev.type==pygame.MOUSEBUTTONDOWN and ev.button==1:
                     pt=ev.pos
+                    # UI buttons
                     if self.btn_rect['reshuffle'].collidepoint(pt):
-                        self.board.generate_board();self.board.compute_graph()
-                    elif self.btn_rect['clear'].collidepoint(pt):
-                        self.clear_board()
-                    elif self.btn_rect['road'].collidepoint(pt):
-                        self.build_mode='road';print(f"[Turn {self.current_turn}] Mode: Road")
-                    elif self.btn_rect['settle'].collidepoint(pt):
-                        self.build_mode='settle';print(f"[Turn {self.current_turn}] Mode: Settle")
-                    elif self.btn_rect['upgrade'].collidepoint(pt):
-                        self.build_mode='upgrade';print(f"[Turn {self.current_turn}] Mode: Upgrade")
-                    elif self.btn_rect['buy'].collidepoint(pt):
-                        self.buy()
+                        self.board.generate_board(); self.board.compute_graph(); print("[Game] Board reshuffled")
+                    elif self.btn_rect['clear'].collidepoint(pt): self.clear_board()
+                    elif self.btn_rect['road'].collidepoint(pt): self.build_mode='road'; print(f"[Turn {self.current_turn}] Mode: Road")
+                    elif self.btn_rect['settle'].collidepoint(pt): self.build_mode='settle'; print(f"[Turn {self.current_turn}] Mode: Settle")
+                    elif self.btn_rect['upgrade'].collidepoint(pt): self.build_mode='upgrade'; print(f"[Turn {self.current_turn}] Mode: Upgrade")
+                    elif self.btn_rect['buy'].collidepoint(pt): self.buy()
                     elif self.btn_rect['dec'].collidepoint(pt) and self.num_players>self.min_players:
-                        self.num_players-=1;self.setup_players();print(f"[Game] Players: {self.num_players}")
+                        self.num_players-=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
                     elif self.btn_rect['inc'].collidepoint(pt) and self.num_players<self.max_players:
-                        self.num_players+=1;self.setup_players();print(f"[Game] Players: {self.num_players}")
+                        self.num_players+=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
                     elif self.roll_rect.collidepoint(pt) and self.roll_active:
-                        self.roll_dice()
+                        self.next_turn(); self.dice_result=random.randint(1,6)+random.randint(1,6); print(f"[Turn {self.current_turn}] Rolled {self.dice_result}")
                     elif any(r.collidepoint(pt) for r in self.stats_rects):
                         for i,r in enumerate(self.stats_rects):
-                            if r.collidepoint(pt):
-                                self.selected_player=i;print(f"[Game] Selected {self.players[i].name}")
-                                break
+                            if r.collidepoint(pt): self.selected_player=i; print(f"[Game] Selected {self.players[i].name}"); break
                     elif self.play_buttons:
                         for lbl,(btn,play) in self.play_buttons.items():
                             if btn.collidepoint(pt):
@@ -370,44 +401,33 @@ class Game:
                                 break
                     else:
                         self.place_piece(pt)
-            # DRAW FRAME
+            # Render everything
             self.screen.fill(COLOR_BG)
             self.board.draw(self.screen)
             self.draw_placements()
+            self.draw_player_stats()
+            self.draw_selected_info()
+            # Draw UI and roll button
             for name,label in [('reshuffle','Reshuffle'),('clear','Clear'),('road','Road'),('settle','Settle'),('upgrade','Upgrade'),('buy','Buy')]:
                 r=self.btn_rect[name]
-                bg=COLOR_ACTIVE_BUTTON_BG if name==self.build_mode else COLOR_BUTTON
-                br=COLOR_ACTIVE_BUTTON_BORDER if name==self.build_mode else COLOR_LINE
-                pygame.draw.rect(self.screen,bg,r);pygame.draw.rect(self.screen,br,r,2)
+                bg=COLOR_ACTIVE_BUTTON_BG if self.build_mode==name else COLOR_BUTTON
+                br=COLOR_ACTIVE_BUTTON_BORDER if self.build_mode==name else COLOR_LINE
+                pygame.draw.rect(self.screen,bg,r); pygame.draw.rect(self.screen,br,r,2)
                 txt=self.font.render(label,True,COLOR_BUTTON_TEXT)
                 self.screen.blit(txt,txt.get_rect(center=r.center))
             for name,label in [('dec','-'),('inc','+')]:
                 r=self.btn_rect[name]
-                pygame.draw.rect(self.screen,COLOR_BUTTON,r);pygame.draw.rect(self.screen,COLOR_LINE,r,2)
-                txt=self.font.render(label,True,COLOR_BUTTON_TEXT)
-                self.screen.blit(txt,txt.get_rect(center=r.center))
-            self.draw_player_stats()
-            self.draw_selected_info()
-            if self.roll_active:
-                pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BG,self.roll_rect)
-                pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BORDER,self.roll_rect,3)
-            else:
-                pygame.draw.rect(self.screen,COLOR_BUTTON,self.roll_rect)
-                        # Roll button label
-            rd = self.font.render("Roll Dice", True, COLOR_BUTTON_TEXT)
-            self.screen.blit(rd, rd.get_rect(center=self.roll_rect.center))
-            # Dice result display
+                pygame.draw.rect(self.screen,COLOR_BUTTON,r); pygame.draw.rect(self.screen,COLOR_LINE,r,2)
+                self.screen.blit(self.font.render(label,True,COLOR_BUTTON_TEXT), self.font.render(label,True,COLOR_BUTTON_TEXT).get_rect(center=r.center))
+            pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BG if self.roll_active else COLOR_BUTTON,self.roll_rect)
+            pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BORDER if self.roll_active else COLOR_LINE,self.roll_rect,3)
+            rd=self.font.render("Roll Dice",True,COLOR_BUTTON_TEXT)
+            self.screen.blit(rd,rd.get_rect(center=self.roll_rect.center))
             if self.dice_result is not None:
-                dr = self.font.render(f"Total: {self.dice_result}", True, COLOR_BUTTON_TEXT)
-                self.screen.blit(dr, dr.get_rect(midbottom=(self.roll_rect.centerx, self.roll_rect.top-10)))
-
-            # Update display and tick
-            pygame.display.flip()
-            self.clock.tick(30)
-
-        pygame.quit()
-        sys.exit()
+                dr=self.font.render(f"Total: {self.dice_result}",True,COLOR_BUTTON_TEXT)
+                self.screen.blit(dr,dr.get_rect(midbottom=(self.roll_rect.centerx,self.roll_rect.top-10)))
+            pygame.display.flip(); self.clock.tick(30)
+        pygame.quit(); sys.exit()
 
 if __name__ == "__main__":
     Game(num_players=3).run()
-
