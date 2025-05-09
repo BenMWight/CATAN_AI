@@ -232,7 +232,11 @@ class Game:
         self.init_ui()
         self.setup_players()
         self.phase = 'setup'  # Track whether in initial placement or regular game
+        self.setup_step = 0  # Tracks progress through setup phase (settlement and road)
         self.robber_tile_index = None  # Track robber location
+        print("[Game] Board reshuffled")
+        print("[Setup] Entering setup phase")
+        print(f"[Setup] {self.players[self.setup_player_index()].name} to place settlement")
 
     def init_ui(self):
         """Define rectangles for UI buttons."""
@@ -306,11 +310,6 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
-    def place_piece(self, pt):
-        # TODO: Wrap this with can_afford + is_valid_*
-        # and deduct resources with pay_cost
-        pass
-
     def next_turn(self):
         self.current_turn += 1
         self.handle_roll()
@@ -366,39 +365,71 @@ class Game:
                 break
 
     def place_piece(self, pt):
-        """Handle clicks to place roads, settlements, or upgrade to cities."""
+        if self.phase == 'setup':
+            player_index = self.setup_player_index()
+            player = self.players[player_index]
+            self.selected_player = player_index
+
+            if self.setup_step % 2 == 0:
+                # Settlement placement
+                idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
+                if self.node_ownership.get(idx):
+                    print(f"[Setup] {player.name} cannot place settlement: node {idx} already occupied")
+                    return
+                if not self.is_valid_settlement(player, idx):
+                    print(f"[Setup] {player.name} cannot place settlement: invalid location at node {idx}")
+                    return
+                player.node_states[idx] = "settlement"
+                self.node_ownership[idx] = (player.id, 'settlement')
+                print(f"[Setup] {player.name} placed settlement at node {idx}")
+            else:
+                # Road placement
+                idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0] - self.pos_edges[i][0], pt[1] - self.pos_edges[i][1]))
+                player.edge_states[idx] = "road"
+                self.edge_ownership[idx] = (player.id, 'road')
+                print(f"[Setup] {player.name} placed road at edge {idx}")
+
+            self.setup_step += 1
+
+            if self.setup_step >= self.num_players * 2 * 2:
+                self.phase = 'main'
+                print("[Game] Setup complete, entering main game phase")
+                print(f"[Game] {self.players[self.current_turn % self.num_players].name}'s turn to roll the dice")
+            else:
+                next_player = self.players[self.setup_player_index()]
+                next_action = "settlement" if self.setup_step % 2 == 0 else "road"
+                print(f"[Setup] {next_player.name} to place {next_action}")
+            return
+
+        # ⬇️ MAIN GAME PHASE (normal placements)
         p = self.players[self.selected_player]
+
         if self.build_mode == 'road':
-            # Find closest edge index
             idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0]-self.pos_edges[i][0], pt[1]-self.pos_edges[i][1]))
             if p.edge_states[idx] == "empty":
                 p.edge_states[idx] = "road"
                 self.edge_ownership[idx] = (p.id, 'road')
                 p.update_stats()
                 print(f"{self.log_prefix()} built road at edge {idx}")
+
         elif self.build_mode == 'settle':
             idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
             if self.node_ownership.get(idx):
                 print(f"{self.log_prefix()} cannot build: node {idx} already occupied")
                 return
-            p = self.players[self.selected_player]
-            # Optional: check for minimum distance (e.g., no adjacent settlements)
             if not self.is_valid_settlement(p, idx):
                 print(f"{self.log_prefix()} invalid settlement location at node {idx}")
                 return
-            # Check and deduct resources only if not in setup phase
-            if self.phase != 'setup':
-                if not self.can_afford(p, 'settle'):
-                    print(f"{self.log_prefix()} cannot afford a settlement")
-                    return
-                self.pay_cost(p, 'settle')
-            # Place the settlement
+            if not self.can_afford(p, 'settle'):
+                print(f"{self.log_prefix()} cannot afford a settlement")
+                return
+            self.pay_cost(p, 'settle')
             p.node_states[idx] = "settlement"
             self.node_ownership[idx] = (p.id, 'settlement')
             p.update_stats()
             print(f"{self.log_prefix()} built settlement at node {idx}")
+
         elif self.build_mode == 'upgrade':
-            # Upgrade first settlement found
             for i,state in enumerate(p.node_states):
                 if state == "settlement":
                     p.node_states[i] = "city"
@@ -407,22 +438,38 @@ class Game:
                     print(f"{self.log_prefix()} upgraded settlement to city at node {i}")
                     break
 
+
+    def setup_player_index(self):
+        total_steps = self.num_players * 2  # 2 placements per player
+        if self.setup_step < total_steps:
+            return self.setup_step % self.num_players
+        else:
+            return self.num_players - 1 - (self.setup_step % self.num_players)
+
     def draw_player_stats(self):
         """Draw stats panels for all players at top of screen."""
         self.stats_rects = []
         sx, sy = 20, 80  # Starting x,y
         lh = self.font.get_height()
         bw = 220  # Panel width
-        for i,p in enumerate(self.players):
+
+        if self.phase == 'setup':
+            active_id = self.setup_player_index()
+        else:
+            active_id = self.current_turn % self.num_players
+
+        for i, p in enumerate(self.players):
             x = sx + i*(bw + 10)
             y = sy
             rect = pygame.Rect(x-5, y-5, bw, lh*6+10)
             pygame.draw.rect(self.screen, (255,255,255), rect)
 
-            if self.is_active_player(p.id):
+            # ✅ Now this line is inside the loop and uses `p`
+            if p.id == active_id:
                 pygame.draw.rect(self.screen, COLOR_CURRENT_TURN, rect, 3)
             else:
                 pygame.draw.rect(self.screen, COLOR_NOT_TURN, rect, 3)
+
             self.stats_rects.append(rect)
             self.screen.blit(self.title_font.render(p.name, True, p.color), (x,y))
             stats = [
@@ -434,6 +481,7 @@ class Game:
             ]
             for j,t in enumerate(stats, start=1):
                 self.screen.blit(self.font.render(t,True,COLOR_BUTTON_TEXT),(x+5,y+j*lh))
+
 
     def draw_selected_info(self):
         """Draw resources and dev card info for selected player with play buttons."""
@@ -529,6 +577,10 @@ class Game:
                 elif ev.type==pygame.MOUSEBUTTONDOWN and ev.button==1:
                     pt=ev.pos
                     # UI buttons
+                    if self.phase == 'setup':
+                        # Block road/settle/upgrade/buy buttons
+                        if name in ['road', 'settle', 'upgrade', 'buy']:
+                            continue
                     if self.btn_rect['reshuffle'].collidepoint(pt):
                         self.board.generate_board(); self.board.compute_graph(); print("[Game] Board reshuffled")
                     elif self.btn_rect['clear'].collidepoint(pt): self.clear_board()
@@ -546,7 +598,7 @@ class Game:
                         self.num_players-=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
                     elif self.btn_rect['inc'].collidepoint(pt) and self.num_players<self.max_players:
                         self.num_players+=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
-                    elif self.roll_rect.collidepoint(pt) and self.roll_active:
+                    elif self.roll_rect.collidepoint(pt) and self.roll_active and self.phase != 'setup':
                         self.next_turn()
                         self.dice_result=random.randint(1,6)+random.randint(1,6)
                         print(f"{self.log_prefix()} Rolled {self.dice_result}")
@@ -580,6 +632,7 @@ class Game:
                 r=self.btn_rect[name]
                 pygame.draw.rect(self.screen,COLOR_BUTTON,r); pygame.draw.rect(self.screen,COLOR_LINE,r,2)
                 self.screen.blit(self.font.render(label,True,COLOR_BUTTON_TEXT), self.font.render(label,True,COLOR_BUTTON_TEXT).get_rect(center=r.center))
+            active = self.roll_active and self.phase != 'setup'
             pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BG if self.roll_active else COLOR_BUTTON,self.roll_rect)
             pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BORDER if self.roll_active else COLOR_LINE,self.roll_rect,3)
             rd=self.font.render("Roll Dice",True,COLOR_BUTTON_TEXT)
