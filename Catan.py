@@ -381,12 +381,12 @@ class Game:
             return
 
         if self.phase == 'setup':
-            player_index = self.setup_player_index()
-            player = self.players[player_index]
-            self.selected_player = player_index
-
             if self.setup_step % 2 == 0:
                 # Settlement placement
+                player_index = self.setup_player_index()
+                player = self.players[player_index]
+                self.selected_player = player_index
+
                 idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
                 if self.node_ownership.get(idx):
                     print(f"[Setup] {player.name} cannot place settlement: node {idx} already occupied")
@@ -397,14 +397,20 @@ class Game:
                 player.node_states[idx] = "settlement"
                 self.node_ownership[idx] = (player.id, 'settlement')
                 print(f"[Setup] {player.name} placed settlement at node {idx}")
+            
             else:
                 # Road placement
+                player_index = self.setup_player_index()
+                player = self.players[player_index]
+                self.selected_player = player_index
+
                 idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0] - self.pos_edges[i][0], pt[1] - self.pos_edges[i][1]))
                 player.edge_states[idx] = "road"
                 self.edge_ownership[idx] = (player.id, 'road')
                 print(f"[Setup] {player.name} placed road at edge {idx}")
 
             self.setup_step += 1
+
 
             if self.setup_step >= self.num_players * 2 * 2:
                 self.phase = 'main'
@@ -455,11 +461,16 @@ class Game:
 
 
     def setup_player_index(self):
-        total_steps = self.num_players * 2  # 2 placements per player
+        placements_per_player = 2
+        total_steps = self.num_players * placements_per_player
+
         if self.setup_step < total_steps:
-            return self.setup_step % self.num_players
+            # First round: forward order
+            return self.setup_step // placements_per_player
         else:
-            return self.num_players - 1 - (self.setup_step % self.num_players)
+            # Second round: reverse order
+            return self.num_players - 1 - ((self.setup_step - total_steps) // placements_per_player)
+
 
     def draw_player_stats(self):
         """Draw stats panels for all players at top of screen."""
@@ -581,7 +592,8 @@ class Game:
     
     def log_prefix(self):
         r, t = self.get_round_and_turn()
-        return f"[Round {r} - Turn {t}] Player {self.current_player().name}"
+        player = self.players[self.setup_player_index()] if self.phase == 'setup' else self.current_player()
+        return f"[Round {r} - Turn {t}] Player {player.name}"
 
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
