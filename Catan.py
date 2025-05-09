@@ -256,8 +256,33 @@ class Game:
         return True
 
     def is_valid_road(self, player, edge_index):
-        # TODO: Ensure road is connected to existing player structures
-        return True
+        edge_pos = self.pos_edges[edge_index]
+
+        # Check if edge is already taken
+        if edge_index in self.edge_ownership:
+            return False
+
+        # Find adjacent node indices (settlements/cities)
+        adjacent_node_indices = [
+            i for i, node_pos in enumerate(self.pos_nodes)
+            if math.hypot(edge_pos[0] - node_pos[0], edge_pos[1] - node_pos[1]) < HEX_RADIUS * 0.6
+        ]
+
+        # ✅ Check if any adjacent node is owned by the player
+        for node_index in adjacent_node_indices:
+            owner = self.node_ownership.get(node_index)
+            if owner and owner[0] == player.id:
+                return True
+
+        # ✅ Check if any neighboring edge is owned by the player
+        for i, other_edge_pos in enumerate(self.pos_edges):
+            if i == edge_index:
+                continue
+            if math.hypot(edge_pos[0] - other_edge_pos[0], edge_pos[1] - other_edge_pos[1]) < HEX_RADIUS * 0.6:
+                if self.edge_ownership.get(i, (None,))[0] == player.id:
+                    return True
+
+        return False
 
     def can_afford(self, player, build_type):
         for res, cost in BUILD_COSTS[build_type].items():
@@ -342,12 +367,20 @@ class Game:
         print(f"{self.log_prefix()}'s turn")
 
     def clear_board(self):
-        """Reset all placement states for each player."""
+        """Reset all placement states and ownership for a fresh start."""
         for p in self.players:
-            p.node_states = ["empty"]*len(self.pos_nodes)
-            p.edge_states = ["empty"]*len(self.pos_edges)
+            p.node_states = ["empty"] * len(self.pos_nodes)
+            p.edge_states = ["empty"] * len(self.pos_edges)
             p.update_stats()
+
+        self.node_ownership.clear()
+        self.edge_ownership.clear()
+        self.phase = 'setup'
+        self.setup_step = 0
+        self.dice_result = None
         print("[Game] Board cleared")
+        print("[Setup] Entering setup phase")
+        print(f"[Setup] {self.players[self.setup_player_index()].name} to place settlement")
 
     def buy(self):
         """Buy a random development card and log purchase."""
@@ -405,6 +438,11 @@ class Game:
                 self.selected_player = player_index
 
                 idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0] - self.pos_edges[i][0], pt[1] - self.pos_edges[i][1]))
+                
+                if not self.is_valid_road(player, idx):
+                    print(f"[Setup] {player.name} cannot place road: not adjacent to own settlement or road")
+                    return
+
                 player.edge_states[idx] = "road"
                 self.edge_ownership[idx] = (player.id, 'road')
                 print(f"[Setup] {player.name} placed road at edge {idx}")
