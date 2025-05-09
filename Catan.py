@@ -8,7 +8,7 @@ from enum import Enum, auto
 SCREEN_WIDTH, SCREEN_HEIGHT = 1200, 900  # Window dimensions
 HEX_RADIUS = 70  # Radius of each hex tile
 BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # Center of the board
-SNAP_THRESHOLD = 30  # Pixel distance threshold for snapping clicks to nodes/edges
+SNAP_THRESHOLD = 45  # Pixel distance threshold for snapping clicks to nodes/edges
 
 # --- Colors ---
 COLOR_BG = (245, 222, 179)  # Background sand/beige
@@ -210,6 +210,7 @@ class Game:
         self.board = Board()
         self.pos_nodes = sorted(self.board.nodes, key=lambda p: (p[1], p[0]))
         self.pos_edges = sorted(self.board.edges, key=lambda p: (p[1], p[0]))
+        print(f"[DEBUG] Loaded {len(self.pos_nodes)} nodes and {len(self.pos_edges)} edges")
         # Player setup
         self.min_players, self.max_players = 2, 5
         self.num_players = max(self.min_players, min(num_players, self.max_players))
@@ -365,6 +366,20 @@ class Game:
                 break
 
     def place_piece(self, pt):
+        print(f"[DEBUG] Clicked at {pt}")
+
+        if not self.pos_nodes:
+            print("[DEBUG] pos_nodes is empty!")
+            return
+
+        idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
+        dist = math.hypot(pt[0] - self.pos_nodes[idx][0], pt[1] - self.pos_nodes[idx][1])
+        print(f"[DEBUG] Closest node is {idx} at distance {dist}")
+
+        if dist > SNAP_THRESHOLD:
+            print(f"[DEBUG] Too far from node. Not placing.")
+            return
+
         if self.phase == 'setup':
             player_index = self.setup_player_index()
             player = self.players[player_index]
@@ -574,46 +589,84 @@ class Game:
         while running:
             for ev in pygame.event.get():
                 if ev.type==pygame.QUIT: running=False
-                elif ev.type==pygame.MOUSEBUTTONDOWN and ev.button==1:
-                    pt=ev.pos
-                    # UI buttons
-                    if self.phase == 'setup':
-                        # Block road/settle/upgrade/buy buttons
-                        if name in ['road', 'settle', 'upgrade', 'buy']:
-                            continue
-                    if self.btn_rect['reshuffle'].collidepoint(pt):
-                        self.board.generate_board(); self.board.compute_graph(); print("[Game] Board reshuffled")
-                    elif self.btn_rect['clear'].collidepoint(pt): self.clear_board()
-                    elif self.btn_rect['road'].collidepoint(pt): 
-                        self.build_mode='road'
-                        print(f"{self.log_prefix()} Mode: Road")
-                    elif self.btn_rect['settle'].collidepoint(pt): 
-                        self.build_mode='settle'
-                        print(f"{self.log_prefix()} Mode: Settle")
-                    elif self.btn_rect['upgrade'].collidepoint(pt): 
-                        self.build_mode='upgrade'
-                        print(f"{self.log_prefix()} Mode: Upgrade")
-                    elif self.btn_rect['buy'].collidepoint(pt): self.buy()
-                    elif self.btn_rect['dec'].collidepoint(pt) and self.num_players>self.min_players:
-                        self.num_players-=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
-                    elif self.btn_rect['inc'].collidepoint(pt) and self.num_players<self.max_players:
-                        self.num_players+=1; self.setup_players(); print(f"[Game] Players: {self.num_players}")
-                    elif self.roll_rect.collidepoint(pt) and self.roll_active and self.phase != 'setup':
-                        self.next_turn()
-                        self.dice_result=random.randint(1,6)+random.randint(1,6)
-                        print(f"{self.log_prefix()} Rolled {self.dice_result}")
-                    elif any(r.collidepoint(pt) for r in self.stats_rects):
-                        for i,r in enumerate(self.stats_rects):
-                            if r.collidepoint(pt): self.selected_player=i; print(f"[Game] Selected {self.players[i].name}"); break
-                    elif self.play_buttons:
-                        for lbl,(btn,play) in self.play_buttons.items():
-                            if btn.collidepoint(pt):
-                                if play: self.play_card(lbl)
-                                else: 
-                                    print(f"{self.log_prefix()} Cannot play {lbl} yet")
-                                break
-                    else:
-                        self.place_piece(pt)
+                elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                    pt = ev.pos
+                    print(f"[DEBUG] Mouse click at {pt}")
+
+                    # Handle UI buttons
+                    clicked_ui = False
+                    for name, rect in self.btn_rect.items():
+                        if rect.collidepoint(pt):
+                            print(f"[DEBUG] Clicked button '{name}'")
+                            clicked_ui = True
+                            if name == 'reshuffle':
+                                self.board.generate_board()
+                                self.board.compute_graph()
+                                self.pos_nodes = sorted(self.board.nodes, key=lambda p: (p[1], p[0]))
+                                self.pos_edges = sorted(self.board.edges, key=lambda p: (p[1], p[0]))
+                                print("[Game] Board reshuffled")
+                                print(f"[DEBUG] Reloaded {len(self.pos_nodes)} nodes and {len(self.pos_edges)} edges")
+                            elif name == 'clear':
+                                self.clear_board()
+                            elif name == 'road':
+                                self.build_mode = 'road'
+                                print(f"{self.log_prefix()} Mode: Road")
+                            elif name == 'settle':
+                                self.build_mode = 'settle'
+                                print(f"{self.log_prefix()} Mode: Settle")
+                            elif name == 'upgrade':
+                                self.build_mode = 'upgrade'
+                                print(f"{self.log_prefix()} Mode: Upgrade")
+                            elif name == 'buy':
+                                self.buy()
+                            elif name == 'dec' and self.num_players > self.min_players:
+                                self.num_players -= 1
+                                self.setup_players()
+                                print(f"[Game] Players: {self.num_players}")
+                            elif name == 'inc' and self.num_players < self.max_players:
+                                self.num_players += 1
+                                self.setup_players()
+                                print(f"[Game] Players: {self.num_players}")
+                            break  # only break if we hit something
+
+                    if not clicked_ui:
+                        print(f"[DEBUG] not clicked_ui")
+                        # Roll button
+                        if self.roll_rect.collidepoint(pt):
+                            print("[DEBUG] Clicked roll button")
+                            if self.roll_active and self.phase != 'setup':
+                                self.next_turn()
+                                self.dice_result = random.randint(1, 6) + random.randint(1, 6)
+                                print(f"{self.log_prefix()} Rolled {self.dice_result}")
+                            else:
+                                print("[DEBUG] Roll ignored (setup phase or inactive)")
+                        
+                        # Player stats panel click
+                        elif any(r.collidepoint(pt) for r in self.stats_rects):
+                            print("[DEBUG] Clicked player stats panel")
+                            for i, r in enumerate(self.stats_rects):
+                                if r.collidepoint(pt):
+                                    self.selected_player = i
+                                    print(f"[Game] Selected {self.players[i].name}")
+                                    break
+
+                        # Play development cards
+                        elif self.phase == 'main' and self.play_buttons:
+                            print("[DEBUG] Check DEV cards")
+                            for lbl, (btn, play) in self.play_buttons.items():
+                                if btn.collidepoint(pt):
+                                    print(f"[DEBUG] Clicked dev card: {lbl}")
+                                    if play:
+                                        self.play_card(lbl)
+                                    else:
+                                        print(f"{self.log_prefix()} Cannot play {lbl} yet")
+                                    break
+
+                        # Not a UI element: treat as board click
+                        else:
+                            print("[DEBUG] Attempting board piece placement")
+                            self.place_piece(pt)
+
             # Render everything
             self.screen.fill(COLOR_BG)
             self.board.draw(self.screen)
@@ -640,6 +693,13 @@ class Game:
             if self.dice_result is not None:
                 dr=self.font.render(f"Total: {self.dice_result}",True,COLOR_BUTTON_TEXT)
                 self.screen.blit(dr,dr.get_rect(midbottom=(self.roll_rect.centerx,self.roll_rect.top-10)))
+            # Show setup phase instructions
+            if self.phase == 'setup':
+                next_player = self.players[self.setup_player_index()]
+                next_action = "settlement" if self.setup_step % 2 == 0 else "road"
+                instruction = f"{next_player.name}, place your {next_action}"
+                text_surface = self.font.render(instruction, True, (0, 0, 0))
+                self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
             pygame.display.flip(); self.clock.tick(30)
         pygame.quit(); sys.exit()
 

@@ -7,6 +7,40 @@ A simplified version of the board game *Catan* implemented using Python and Pyga
 
 ---
 
+## ✅ New Features Added 9/05/25
+
+### 🏗️ Setup Phase Overhaul
+- **Setup Phase Introduced**:
+  - Players take turns placing settlements and roads in a 1 → N → 1 snake order.
+  - Tracked using `self.phase = 'setup'` and `self.setup_step = 0`.
+  - Ends automatically and transitions to main gameplay after 2 settlements + 2 roads per player.
+- **Turn Indicator in Setup**:
+  - Setup now highlights the correct player’s panel (green) during placement.
+  - Instructional text displayed at the bottom: `"Player X, place your settlement/road"`.
+
+### 🧪 Debugging & Placement Fixes
+- **Debug Logging**:
+  - Added click logging: `"[DEBUG] Clicked at (x, y)"`.
+  - Logs closest node and distance for click validation.
+  - Logs placement events: `"Player X placed settlement at node Y"`.
+- **Improved Proximity Handling**:
+  - Set `SNAP_THRESHOLD = 100` to allow more forgiving placement clicks.
+  - Prevents placement if too far from node or edge.
+
+### 🛠️ Input Handling Fixes
+- **UI Interaction Fixes**:
+  - Replaced faulty `for...break` button logic with `clicked_ui` flag for accurate event routing.
+  - Ensures `self.place_piece(pt)` is called when no UI button was clicked.
+- **Dev Card UI Bug Fixed**:
+  - Dev card buttons no longer intercept all clicks during setup.
+  - `self.play_buttons` is only checked in main phase (`self.phase == 'main'`).
+
+### 🔁 Board Sync Improvements
+- **Board Reset Now Resyncs Graph**:
+  - Clicking "Reshuffle" now resets `self.pos_nodes` and `self.pos_edges` to match new board layout.
+
+---
+
 ## ✅ New Features Added 7/05/25
 
 ### 🎮 Gameplay Mechanics
