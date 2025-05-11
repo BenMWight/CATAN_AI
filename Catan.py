@@ -11,7 +11,7 @@ BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # Center of the board
 SNAP_THRESHOLD = 45  # Pixel distance threshold for snapping clicks to nodes/edges
 
 # ---Debugging ---
-SHOW_NODE_IDS = False
+SHOW_NODE_IDS = True
 
 # --- Colors ---
 COLOR_BG = (245, 222, 179)  # Background sand/beige
@@ -117,17 +117,35 @@ class Tile:
             text = font.render(str(self.number), True, COLOR_BUTTON_TEXT)
             screen.blit(text, text.get_rect(center=self.position))
 
+class Harbour:
+    def __init__(self, position, trade_type="3:1", angle=0, node_indices=None):
+        self.position = position
+        self.trade_type = trade_type
+        self.angle = angle
+        self.node_indices = node_indices or []
+
+    def draw(self, screen):
+        # Draw the harbour circle (dock)
+        pygame.draw.circle(screen, (0, 0, 255), (int(self.position[0]), int(self.position[1])), 10, 2)
+
+        # Draw the trade type label
+        font = pygame.font.SysFont(None, 18)
+        label = font.render(self.trade_type, True, (0, 0, 0))
+        screen.blit(label, (self.position[0] + 12, self.position[1] - 8))
+
 class Board:
     """
     Manages the hex grid: generates tile layout, computes
     graph nodes (for settlements) and edges (for roads).
     """
     def __init__(self):
-        self.tiles = []  # List of Tile objects
-        self.nodes = []  # Unique corner positions for settlements
-        self.edges = []  # Midpoints between corners for roads
-        self.generate_board()
+        self.tiles = []
+        self.nodes = []
+        self.edges = []
+        self.harbours = []
+        self.generate_board()       # ✅ First create tiles
         self.compute_graph()
+        self.generate_harbours()    # ✅ Now safe to reference self.tiles
 
     def generate_board(self):
         """
@@ -158,10 +176,63 @@ class Board:
         for i, tile in enumerate(self.tiles):
             print(f"  Tile {i} at {tile.position} - {tile.resource.name}, number: {tile.number}")
 
+    def generate_harbours(self):
+        self.harbours.clear()
+
+        # Manually selected pairs of coastal nodes by index (can tune this)
+        # Each pair represents the two settlement spots on the harbour
+        harbour_node_pairs = [
+            (0, 4),
+            (2, 5),
+            (10, 15),
+            (26, 32),
+            (7, 11),
+            (42, 46),
+            (52, 49),
+            (47, 43),
+            (27, 33),
+        ]
+        random.shuffle(harbour_node_pairs)
+
+
+        types = [
+            "2:1 wood", "2:1 brick", "2:1 ore", "2:1 sheep", "2:1 wheat",
+            "3:1", "3:1", "3:1", "3:1"
+        ]
+
+        for (i, j), trade_type in zip(harbour_node_pairs, types):
+            node_i = self.nodes[i]
+            node_j = self.nodes[j]
+
+            # Midpoint between the two coastal nodes
+            mid_x = (node_i[0] + node_j[0]) / 2
+            mid_y = (node_i[1] + node_j[1]) / 2
+
+            # Vector from midpoint to outside of board (perpendicular direction)
+            dx = mid_x - BOARD_ORIGIN[0]
+            dy = mid_y - BOARD_ORIGIN[1]
+            mag = math.hypot(dx, dy)
+            dx /= mag
+            dy /= mag
+
+            # Push the dock out 40 pixels further from the board center
+            dock_x = mid_x + dx * 40
+            dock_y = mid_y + dy * 40
+            angle = math.atan2(-dy, -dx)  # Facing back toward the board
+
+            # Store it
+            self.harbours.append(Harbour((dock_x, dock_y), trade_type, angle, [i, j]))
+
+
     def draw(self, screen):
         """Draws all hex tiles on provided screen."""
         for tile in self.tiles:
             tile.draw(screen)
+        for harbour in self.harbours:
+            harbour.draw(screen)
+            for idx in harbour.node_indices:
+                if 0 <= idx < len(self.nodes):
+                    pygame.draw.line(screen, (0, 0, 255), harbour.position, self.nodes[idx], 2)
 
     def compute_graph(self):
         self.nodes = []
