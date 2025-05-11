@@ -10,6 +10,9 @@ HEX_RADIUS = 70  # Radius of each hex tile
 BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # Center of the board
 SNAP_THRESHOLD = 45  # Pixel distance threshold for snapping clicks to nodes/edges
 
+# ---Debugging ---
+SHOW_NODE_IDS = False
+
 # --- Colors ---
 COLOR_BG = (245, 222, 179)  # Background sand/beige
 COLOR_LINE = (0, 0, 0)  # Outline lines
@@ -64,6 +67,23 @@ class Resource(Enum):
     WHEAT = auto()
     ORE = auto()
     DESERT = auto()
+
+class Debug_And_Log:
+    """Class to log different types"""
+    def __init__(self):
+        self.mode = "Debug" # Debug, Normal, Off
+
+    def Debug_Log(self, text):
+        if self.mode == "Debug":
+            print(f'[Debug] {text}')
+
+    def Game_Log(self, text):
+        if self.mode == "Debug" or self.mode == "Normal":
+            print(f'[Game] {text}')
+
+    def Setup_Log(self, text):
+        if self.mode == "Debug" or self.mode == "Normal":
+            print(f'[Setup] {text}')
 
 class Tile:
     """
@@ -134,6 +154,9 @@ class Board:
                 num = None if res == Resource.DESERT else num_pool.pop()
                 self.tiles.append(Tile(res, num, (x, y)))
                 idx += 1
+        print("[DEBUG] Assigned tile numbers:")
+        for i, tile in enumerate(self.tiles):
+            print(f"  Tile {i} at {tile.position} - {tile.resource.name}, number: {tile.number}")
 
     def draw(self, screen):
         """Draws all hex tiles on provided screen."""
@@ -274,8 +297,10 @@ class Game:
         self.play_buttons = {}
         self.build_mode = None
         self.dice_result = None
+        self.ui_popup_message = None  # (text, frame_timer)
         # Whether the roll dice button is active
         self.roll_active = True
+        self.show_node_ids = SHOW_NODE_IDS # Show node IDs for debugging; toggle this as needed
         # Fonts
         self.font = pygame.font.SysFont(None, 24)
         self.title_font = pygame.font.SysFont(None, 28)
@@ -355,14 +380,21 @@ class Game:
             player.resources[res] -= cost
 
     def distribute_resources(self):
+        popup_log = []
+
         for tile in self.board.tiles:
             if tile.number == self.dice_result:
                 for node_index in self.get_adjacent_nodes(tile):
-                    for p in self.players:
-                        if p.node_states[node_index] == "settlement":
-                            p.resources[tile.resource.name.lower()] += 1
-                        elif p.node_states[node_index] == "city":
-                            p.resources[tile.resource.name.lower()] += 2
+                    owner = self.node_ownership.get(node_index)
+                    if owner:
+                        player_id, structure = owner
+                        amount = 2 if structure == "city" else 1
+                        self.players[player_id].resources[tile.resource] += amount
+                        popup_log.append(f"{self.players[player_id].name} +{amount} {tile.resource.name.title()}")
+
+        if popup_log:
+            self.setup_resource_popup = ("Resources: " + ", ".join(popup_log), 3 * 30)
+
 
     def handle_roll(self):
         self.dice_result = random.randint(1, 6) + random.randint(1, 6)
@@ -421,8 +453,17 @@ class Game:
             player.resources[get_res] += 1
 
     def get_adjacent_nodes(self, tile):
-        # TODO: Implement: return node indices adjacent to a given tile
-        return []
+        """Return all node indices that are adjacent (corners) to a given tile."""
+        tile_nodes = []
+        for i, node in enumerate(self.pos_nodes):
+            for j in range(6):
+                angle = math.radians(60 * j - 30)
+                corner_x = tile.position[0] + HEX_RADIUS * math.cos(angle)
+                corner_y = tile.position[1] + HEX_RADIUS * math.sin(angle)
+                if math.hypot(corner_x - node[0], corner_y - node[1]) < 1:
+                    tile_nodes.append(i)
+                    break
+        return tile_nodes
 
     def is_active_player(self, player_id):
         return player_id == (self.current_turn % self.num_players)
@@ -439,6 +480,9 @@ class Game:
         """Advance turn counter and log."""
         self.current_turn += 1
         print(f"{self.log_prefix()}'s turn")
+
+        if self.phase == "game":
+            self.roll_active = True
 
     def clear_board(self):
         """Reset all placement states and ownership for a fresh start."""
@@ -538,7 +582,7 @@ class Game:
 
 
             if self.setup_step >= self.num_players * 2 * 2:
-                self.phase = 'main'
+                self.phase = 'game'
                 print("[Game] Setup complete, entering main game phase")
                 print(f"[Game] {self.players[self.current_turn % self.num_players].name}'s turn to roll the dice")
             else:
@@ -586,19 +630,49 @@ class Game:
 
     def draw_setup_popup(self):
         if self.setup_resource_popup:
-            name, resources, frames_left = self.setup_resource_popup
+            frames_left = 0  # fallback
+
+            # Handle both 2-element and 3-element tuple cases
+            if len(self.setup_resource_popup) == 3:
+                name, resources, frames_left = self.setup_resource_popup
+                message = f"{name} receives: " + ", ".join(resources)
+            else:
+                message, frames_left = self.setup_resource_popup
+
+            # Decrease frame timer
             if frames_left <= 0:
                 self.setup_resource_popup = None
                 return
-            self.setup_resource_popup = (name, resources, frames_left - 1)
 
-            msg = f"{name} receives: " + ", ".join(resources)
-            surf = self.title_font.render(msg, True, (0, 0, 0))
+            # Save updated timer
+            if len(self.setup_resource_popup) == 3:
+                self.setup_resource_popup = (name, resources, frames_left - 1)
+            else:
+                self.setup_resource_popup = (message, frames_left - 1)
+
+            # Draw popup
+            surf = self.title_font.render(message, True, (0, 0, 0))
             bg_rect = pygame.Rect(0, 0, surf.get_width() + 20, surf.get_height() + 10)
             bg_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 160)
 
             pygame.draw.rect(self.screen, (255, 255, 220), bg_rect)
             pygame.draw.rect(self.screen, (0, 0, 0), bg_rect, 2)
+            self.screen.blit(surf, surf.get_rect(center=bg_rect.center))
+
+    def draw_ui_popup(self):  # ✅ Insert it here
+        if self.ui_popup_message:
+            text, frames_left = self.ui_popup_message
+            if frames_left <= 0:
+                self.ui_popup_message = None
+                return
+            self.ui_popup_message = (text, frames_left - 1)
+
+            surf = self.font.render(text, True, (0, 0, 0))
+            bg_rect = pygame.Rect(0, 0, surf.get_width() + 20, surf.get_height() + 10)
+            bg_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 190)
+
+            pygame.draw.rect(self.screen, (255, 220, 220), bg_rect)
+            pygame.draw.rect(self.screen, (150, 0, 0), bg_rect, 2)
             self.screen.blit(surf, surf.get_rect(center=bg_rect.center))
 
     def setup_player_index(self):
@@ -734,9 +808,10 @@ class Game:
                         pygame.draw.rect(self.screen, COLOR_GHOST, pygame.Rect(x - 10, y - 10, 20, 20))
 
         # Draw node index labels for debugging
-        for i, (x, y) in enumerate(self.pos_nodes):
-            label = self.font.render(str(i), True, (0, 0, 0))
-            self.screen.blit(label, (x + 8, y + 8))  # Offset so it doesn't overlap the circle
+        if self.show_node_ids:
+            for i, (x, y) in enumerate(self.pos_nodes):
+                label = self.font.render(str(i), True, (0, 0, 0))
+                self.screen.blit(label, (x + 8, y + 8))  # Offset so it doesn't overlap the circle
 
     def current_player(self):
         return self.players[self.current_turn % self.num_players]
@@ -755,6 +830,29 @@ class Game:
         r, t = self.get_round_and_turn()
         player = self.players[self.setup_player_index()] if self.phase == 'setup' else self.current_player()
         return f"[Round {r} - Turn {t}] Player {player.name}"
+    
+    def roll_dice(self):
+        self.dice_result = random.randint(1, 6) + random.randint(1, 6)
+        self.roll_active = False
+        print(f"[Game] Dice rolled: {self.dice_result}")
+
+        if self.phase == "game" and self.dice_result != 7:
+            popup_log = []
+
+            for tile in self.board.tiles:
+                if tile.number == self.dice_result:
+                    print(f"[DEBUG] Tile {tile.resource.name} matched dice roll {self.dice_result}")
+                    for node_index in self.get_adjacent_nodes(tile):
+                        owner = self.node_ownership.get(node_index)
+                        if owner:
+                            player_id, structure = owner
+                            amount = 2 if structure == "city" else 1
+                            self.players[player_id].resources[tile.resource] += amount
+                            popup_log.append(f"{self.players[player_id].name} +{amount} {tile.resource.name.title()}")
+                            print(f"[DEBUG] {self.players[player_id].name} receives {amount} {tile.resource.name} from node {node_index}")
+
+            if popup_log:
+                self.setup_resource_popup = ("Resources: " + ", ".join(popup_log), 3 * 30)
 
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
@@ -792,14 +890,8 @@ class Game:
                                 print(f"{self.log_prefix()} Mode: Upgrade")
                             elif name == 'buy':
                                 self.buy()
-                            elif name == 'dec' and self.num_players > self.min_players:
-                                self.num_players -= 1
-                                self.setup_players()
-                                print(f"[Game] Players: {self.num_players}")
-                            elif name == 'inc' and self.num_players < self.max_players:
-                                self.num_players += 1
-                                self.setup_players()
-                                print(f"[Game] Players: {self.num_players}")
+                            elif name in ['dec', 'inc']:
+                                self.ui_popup_message = ("Changing player count is not available mid-game.", 180)
                             break  # only break if we hit something
 
                     if not clicked_ui:
@@ -810,7 +902,12 @@ class Game:
                             if self.roll_active and self.phase != 'setup':
                                 self.next_turn()
                                 self.dice_result = random.randint(1, 6) + random.randint(1, 6)
+                                self.roll_dice()
                                 print(f"{self.log_prefix()} Rolled {self.dice_result}")
+                            elif (not self.roll_active) and self.phase != 'setup':
+                                self.roll_active = True
+                                print("[DEBUG] Skip trading and placements for now.")
+                                ### TODO
                             else:
                                 print("[DEBUG] Roll ignored (setup phase or inactive)")
                         
@@ -866,6 +963,7 @@ class Game:
             if self.dice_result is not None:
                 dr=self.font.render(f"Total: {self.dice_result}",True,COLOR_BUTTON_TEXT)
                 self.screen.blit(dr,dr.get_rect(midbottom=(self.roll_rect.centerx,self.roll_rect.top-10)))
+            self.draw_setup_popup()
             # Show setup phase instructions
             if self.phase == 'setup':
                 next_player = self.players[self.setup_player_index()]
@@ -874,7 +972,9 @@ class Game:
                 text_surface = self.font.render(instruction, True, (0, 0, 0))
                 self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
             self.draw_setup_popup()
-            pygame.display.flip(); self.clock.tick(30)
+            pygame.display.flip()
+            self.draw_ui_popup()
+            self.clock.tick(30)
         pygame.quit(); sys.exit()
 
 if __name__ == "__main__":
