@@ -7,6 +7,68 @@ A simplified version of the board game *Catan* implemented using Python and Pyga
 
 ---
 
+## ✅ New Features Added 11/05/25
+
+### 🌊 Harbour System Introduced
+- **Harbours Implemented**:
+  - Added a `Harbour` class to represent trading ports.
+  - Ports are attached to **pairs of coastal nodes** and positioned **outside the board edge**, pointing inward.
+  - Rendered with a blue circle and two connection lines back to nodes.
+- **Random Harbour Placement**:
+  - `harbour_node_pairs` is now randomized with `random.shuffle()`.
+  - Ensures harbours are distributed differently each game.
+- **Resource & 3:1 Port Types**:
+  - Nine harbour types supported (e.g. "2:1 wood", "3:1", etc.).
+  - Types are shuffled alongside node pairs.
+
+### 📈 Debugging & Visual Enhancements
+- **Node ID Labels Toggle**:
+  - `SHOW_NODE_IDS = True` enables labels for each node index.
+  - Helps visualize harbour connections and debug placements.
+- **Harbour-to-Node Debug Output**:
+  - Console shows which nodes each harbour connects to, with distances.
+
+### 🧱 UI/UX Improvements
+- **Player Stats Realignment**:
+  - Player stat panels now stack **vertically on the left** instead of top horizontal.
+  - Prevents overlap with top-edge harbours or tiles.
+- **Dock Placement Visuals**:
+  - Harbours now draw correctly:
+    - **Dock circle is pushed outside** the board.
+    - **Lines connect back** to coastal nodes.
+    - Text labels display the trade type.
+
+### 🔁 Board Architecture Improvements
+- **Tile-to-Node Graph Rewritten**:
+  - `compute_graph()` now:
+    - Deduplicates node coordinates precisely.
+    - Tracks node adjacency (for valid placement checking).
+    - Remaps all node indices to maintain consistent ordering.
+- **Graph-Aware Harbour Placement**:
+  - Harbours snap to existing graph nodes instead of arbitrary positions.
+  - Eliminates tile-center-based approximation.
+
+---
+
+## 🐞 Fixes & Refactors
+
+- ❌ Fixed: Harbour `draw()` previously attempted to use `self.nodes` (which it didn’t own).
+- ✅ Now draws harbour lines inside `Board.draw()` using known node coordinates.
+- 🧹 Refactored `Board.__init__()` to ensure `compute_graph()` runs **before** `generate_harbours()`, fixing missing node issues.
+- ✅ Cleaned up constructor argument mismatch for `Harbour` class (now accepts `node_indices`).
+- 🧪 Improved debug logging structure with centralized `Debug_And_Log` class (early stub added for future use).
+
+---
+
+## 🛠️ In Progress / To Do
+
+- [ ] Use **auto-detected coastal nodes** for harbour placement instead of hardcoding node indices.
+- [ ] Integrate harbour ownership rules (e.g. trade eligibility if player has a settlement on connected node).
+- [ ] Add hover or tooltip UI to explain harbour trade rates during gameplay.
+
+
+---
+
 ## ✅ New Features Added 9/05/25
 
 ### 🏗️ Setup Phase Overhaul
