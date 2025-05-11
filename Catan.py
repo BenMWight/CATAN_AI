@@ -771,8 +771,8 @@ class Game:
             active_id = self.current_turn % self.num_players
 
         for i, p in enumerate(self.players):
-            x = sx + i*(bw + 10)
-            y = sy
+            x = sx
+            y = sy + i*(lh * 6 + 20)
             rect = pygame.Rect(x-5, y-5, bw, lh*6+10)
             pygame.draw.rect(self.screen, (255,255,255), rect)
 
