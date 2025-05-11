@@ -2,6 +2,7 @@ import pygame
 import sys
 import math
 import random
+from engine.game_engine import GameEngine
 from enum import Enum, auto
 
 # --- Constants ---
@@ -67,6 +68,20 @@ class Resource(Enum):
     WHEAT = auto()
     ORE = auto()
     DESERT = auto()
+
+class BotPlayer:
+    def __init__(self, name, strategy_module):
+        self.name = name
+        self.strategy = strategy_module  # imported Python module
+        self.resources = {r: 0 for r in Resource}
+        self.node_states = []
+        self.edge_states = []
+        self.dev_cards = []
+
+    def take_turn(self, game_state):
+        # Example call to script
+        action = self.strategy.choose_build(game_state)
+        return action
 
 class Debug_And_Log:
     """Class to log different types"""
@@ -291,6 +306,11 @@ class Game:
         self.edge_ownership = {}  # edge_index -> player_id
         self.selected_player = 0
         self.current_turn = 0
+        self.engine = GameEngine(
+            players=self.players,
+            tiles=self.board.tiles,
+            nodes=self.pos_nodes,
+            edges=self.pos_edges)
         # UI elements
         self.btn_rect = {}
         self.roll_rect = pygame.Rect(SCREEN_WIDTH-150, SCREEN_HEIGHT-60, 130, 50)
@@ -312,7 +332,9 @@ class Game:
         self.setup_resource_popup = None  # Tuple of (player_name, list of resources, frame_timer)
         print("[Game] Board reshuffled")
         print("[Setup] Entering setup phase")
-        print(f"[Setup] {self.players[self.setup_player_index()].name} to place settlement")
+        print(f"[Setup] {self.engine.players[self.setup_player_index()].name} to place settlement")
+    
+    
 
     def init_ui(self):
         """Define rectangles for UI buttons."""
@@ -327,7 +349,7 @@ class Game:
 
     def is_valid_settlement(self, player, node_index):
         print(f"[DEBUG] Checking node {node_index}, adjacent: {self.board.node_adjacency.get(node_index)}")
-        print(f"[DEBUG] Existing settlements at: {list(self.node_ownership.keys())}")
+        print(f"[DEBUG] Existing settlements at: {list(self.engine.node_ownership.keys())}")
         # Can't place on an already occupied node
         if self.node_ownership.get(node_index):
             return False
@@ -389,8 +411,8 @@ class Game:
                     if owner:
                         player_id, structure = owner
                         amount = 2 if structure == "city" else 1
-                        self.players[player_id].resources[tile.resource] += amount
-                        popup_log.append(f"{self.players[player_id].name} +{amount} {tile.resource.name.title()}")
+                        self.engine.players[player_id].resources[tile.resource] += amount
+                        popup_log.append(f"{self.engine.players[player_id].name} +{amount} {tile.resource.name.title()}")
 
         if popup_log:
             self.setup_resource_popup = ("Resources: " + ", ".join(popup_log), 3 * 30)
@@ -422,7 +444,7 @@ class Game:
             self.handle_robber()
 
     def check_win(self):
-        for p in self.players:
+        for p in self.engine.players:
             if p.victory_points >= WINNING_VICTORY_POINTS:
                 print(f"[Game Over] {self.current_player().name} wins!")
                 pygame.quit()
@@ -474,7 +496,7 @@ class Game:
         for i,name in enumerate(names):
             color = (random.randint(50,255), random.randint(50,255), random.randint(50,255))
             p = Player(i, name, color, len(self.pos_nodes), len(self.pos_edges))
-            self.players.append(p)
+            self.engine.players.append(p)
 
     def next_turn(self):
         """Advance turn counter and log."""
@@ -486,7 +508,7 @@ class Game:
 
     def clear_board(self):
         """Reset all placement states and ownership for a fresh start."""
-        for p in self.players:
+        for p in self.engine.players:
             p.node_states = ["empty"] * len(self.pos_nodes)
             p.edge_states = ["empty"] * len(self.pos_edges)
             p.update_stats()
@@ -498,18 +520,18 @@ class Game:
         self.dice_result = None
         print("[Game] Board cleared")
         print("[Setup] Entering setup phase")
-        print(f"[Setup] {self.players[self.setup_player_index()].name} to place settlement")
+        print(f"[Setup] {self.engine.players[self.setup_player_index()].name} to place settlement")
 
     def buy(self):
         """Buy a random development card and log purchase."""
-        p = self.players[self.selected_player]
+        p = self.engine.players[self.selected_player]
         card = random.choice([lbl for lbl,_ in DEV_CARD_OPTIONS])
         p.dev_cards[card].append(self.current_turn)
         print(f"{self.log_prefix()} bought {card}")
 
     def play_card(self, lbl):
         """Play a bought dev card if eligible and log."""
-        p = self.players[self.selected_player]
+        p = self.engine.players[self.selected_player]
         for t in p.dev_cards[lbl]:
             if t < self.current_turn:
                 p.dev_cards[lbl].remove(t)
@@ -536,7 +558,7 @@ class Game:
             if self.setup_step % 2 == 0:
                 # Settlement placement
                 player_index = self.setup_player_index()
-                player = self.players[player_index]
+                player = self.engine.players[player_index]
                 self.selected_player = player_index
 
                 idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
@@ -547,7 +569,7 @@ class Game:
                     print(f"[Setup] {player.name} cannot place settlement: invalid location at node {idx}")
                     return
                 player.node_states[idx] = "settlement"
-                self.node_ownership[idx] = (player.id, 'settlement')
+                self.engine.node_ownership[idx] = (player.id, 'settlement')
                 print(f"[Setup] {player.name} placed settlement at node {idx}")
 
                 # If it's the player's second settlement (in reverse setup phase), give resources
@@ -565,7 +587,7 @@ class Game:
             else:
                 # Road placement
                 player_index = self.setup_player_index()
-                player = self.players[player_index]
+                player = self.engine.players[player_index]
                 self.selected_player = player_index
 
                 idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0] - self.pos_edges[i][0], pt[1] - self.pos_edges[i][1]))
@@ -584,15 +606,15 @@ class Game:
             if self.setup_step >= self.num_players * 2 * 2:
                 self.phase = 'game'
                 print("[Game] Setup complete, entering main game phase")
-                print(f"[Game] {self.players[self.current_turn % self.num_players].name}'s turn to roll the dice")
+                print(f"[Game] {self.engine.players[self.current_turn % self.num_players].name}'s turn to roll the dice")
             else:
-                next_player = self.players[self.setup_player_index()]
+                next_player = self.engine.players[self.setup_player_index()]
                 next_action = "settlement" if self.setup_step % 2 == 0 else "road"
                 print(f"[Setup] {next_player.name} to place {next_action}")
             return
 
         # ⬇️ MAIN GAME PHASE (normal placements)
-        p = self.players[self.selected_player]
+        p = self.engine.players[self.selected_player]
 
         if self.build_mode == 'road':
             idx = min(range(len(self.pos_edges)), key=lambda i: math.hypot(pt[0]-self.pos_edges[i][0], pt[1]-self.pos_edges[i][1]))
@@ -615,7 +637,7 @@ class Game:
                 return
             self.pay_cost(p, 'settle')
             p.node_states[idx] = "settlement"
-            self.node_ownership[idx] = (p.id, 'settlement')
+            self.engine.node_ownership[idx] = (p.id, 'settlement')
             p.update_stats()
             print(f"{self.log_prefix()} built settlement at node {idx}")
 
@@ -699,7 +721,7 @@ class Game:
         else:
             active_id = self.current_turn % self.num_players
 
-        for i, p in enumerate(self.players):
+        for i, p in enumerate(self.engine.players):
             x = sx + i*(bw + 10)
             y = sy
             rect = pygame.Rect(x-5, y-5, bw, lh*6+10)
@@ -726,7 +748,7 @@ class Game:
 
     def draw_selected_info(self):
         """Draw resources and dev card info for selected player with play buttons."""
-        p = self.players[self.selected_player]
+        p = self.engine.players[self.selected_player]
         info_h = 100
         y0 = SCREEN_HEIGHT - info_h
         info_w = SCREEN_WIDTH - (self.roll_rect.width + 20)
@@ -765,7 +787,7 @@ class Game:
 
     def draw_placements(self):
         """Render roads, settlements, and cities from state arrays."""
-        for p in self.players:
+        for p in self.engine.players:
             for i,st in enumerate(p.edge_states):
                 if st=='road':
                     x,y=self.pos_edges[i]
@@ -795,7 +817,7 @@ class Game:
                     pygame.draw.circle(self.screen, (0, 0, 0), (int(x), int(y)), 10, 1)
 
                 # Then draw allowed ghost spots
-                p = self.players[self.selected_player]
+                p = self.engine.players[self.selected_player]
                 for i, (x, y) in enumerate(self.pos_nodes):
                     if self.is_valid_settlement(p, i):
                         pygame.draw.circle(self.screen, COLOR_GHOST, (int(x), int(y)), 10)
@@ -803,7 +825,7 @@ class Game:
 
             elif self.build_mode == 'upgrade':
                 for i, (x, y) in enumerate(self.pos_nodes):
-                    p = self.players[self.selected_player]
+                    p = self.engine.players[self.selected_player]
                     if p.node_states[i] == "settlement":
                         pygame.draw.rect(self.screen, COLOR_GHOST, pygame.Rect(x - 10, y - 10, 20, 20))
 
@@ -814,7 +836,7 @@ class Game:
                 self.screen.blit(label, (x + 8, y + 8))  # Offset so it doesn't overlap the circle
 
     def current_player(self):
-        return self.players[self.current_turn % self.num_players]
+        return self.engine.players[self.current_turn % self.num_players]
     
     def get_round_and_turn(self):
         if self.phase == 'setup':
@@ -828,7 +850,7 @@ class Game:
     
     def log_prefix(self):
         r, t = self.get_round_and_turn()
-        player = self.players[self.setup_player_index()] if self.phase == 'setup' else self.current_player()
+        player = self.engine.players[self.setup_player_index()] if self.phase == 'setup' else self.current_player()
         return f"[Round {r} - Turn {t}] Player {player.name}"
     
     def roll_dice(self):
@@ -847,9 +869,9 @@ class Game:
                         if owner:
                             player_id, structure = owner
                             amount = 2 if structure == "city" else 1
-                            self.players[player_id].resources[tile.resource] += amount
-                            popup_log.append(f"{self.players[player_id].name} +{amount} {tile.resource.name.title()}")
-                            print(f"[DEBUG] {self.players[player_id].name} receives {amount} {tile.resource.name} from node {node_index}")
+                            self.engine.players[player_id].resources[tile.resource] += amount
+                            popup_log.append(f"{self.engine.players[player_id].name} +{amount} {tile.resource.name.title()}")
+                            print(f"[DEBUG] {self.engine.players[player_id].name} receives {amount} {tile.resource.name} from node {node_index}")
 
             if popup_log:
                 self.setup_resource_popup = ("Resources: " + ", ".join(popup_log), 3 * 30)
@@ -902,7 +924,7 @@ class Game:
                             if self.roll_active and self.phase != 'setup':
                                 self.next_turn()
                                 self.dice_result = random.randint(1, 6) + random.randint(1, 6)
-                                self.roll_dice()
+                                self.engine.roll_dice()
                                 print(f"{self.log_prefix()} Rolled {self.dice_result}")
                             elif (not self.roll_active) and self.phase != 'setup':
                                 self.roll_active = True
@@ -917,7 +939,7 @@ class Game:
                             for i, r in enumerate(self.stats_rects):
                                 if r.collidepoint(pt):
                                     self.selected_player = i
-                                    print(f"[Game] Selected {self.players[i].name}")
+                                    print(f"[Game] Selected {self.engine.players[i].name}")
                                     break
 
                         # Play development cards
@@ -966,7 +988,7 @@ class Game:
             self.draw_setup_popup()
             # Show setup phase instructions
             if self.phase == 'setup':
-                next_player = self.players[self.setup_player_index()]
+                next_player = self.engine.players[self.setup_player_index()]
                 next_action = "settlement" if self.setup_step % 2 == 0 else "road"
                 instruction = f"{next_player.name}, place your {next_action}"
                 text_surface = self.font.render(instruction, True, (0, 0, 0))
