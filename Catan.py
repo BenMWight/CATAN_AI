@@ -395,6 +395,20 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
+    def get_tiles_adjacent_to_node(self, node_index):
+        """Return all tiles adjacent to a node (corner)."""
+        node_pos = self.pos_nodes[node_index]
+        adjacent_tiles = []
+        for tile in self.board.tiles:
+            for i in range(6):
+                angle = math.radians(60 * i - 30)
+                corner_x = tile.position[0] + HEX_RADIUS * math.cos(angle)
+                corner_y = tile.position[1] + HEX_RADIUS * math.sin(angle)
+                if math.hypot(corner_x - node_pos[0], corner_y - node_pos[1]) < 1:
+                    adjacent_tiles.append(tile)
+                    break
+        return adjacent_tiles
+
     def next_turn(self):
         self.current_turn += 1
         self.handle_roll()
@@ -490,6 +504,15 @@ class Game:
                 player.node_states[idx] = "settlement"
                 self.node_ownership[idx] = (player.id, 'settlement')
                 print(f"[Setup] {player.name} placed settlement at node {idx}")
+
+                # If it's the player's second settlement (in reverse setup phase), give resources
+                settlements_now = player.node_states.count("settlement")
+                if self.setup_step >= self.num_players * 2 and settlements_now == 2:
+                    tiles = self.get_tiles_adjacent_to_node(idx)
+                    for tile in tiles:
+                        if tile.resource != Resource.DESERT:
+                            player.resources[tile.resource] += 1
+                    print(f"[Setup] {player.name} received starting resources: {[tile.resource.name for tile in tiles if tile.resource != Resource.DESERT]}")
             
             else:
                 # Road placement
