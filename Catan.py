@@ -141,30 +141,79 @@ class Board:
             tile.draw(screen)
 
     def compute_graph(self):
-        """
-        Builds lists of unique corner (node) and edge midpoint positions
-        used for settlement and road placement.
-        """
-        self.nodes.clear()
-        self.edges.clear()
+        self.nodes = []
+        self.edges = []
+        self.node_adjacency = {}
+
+        # Map to avoid duplicate nodes by coordinate proximity
+        coord_to_index = {}
+
+        # Helper to deduplicate and assign a unique index to each node
+        def get_or_create_node(coord):
+            for existing_coord, idx in coord_to_index.items():
+                if math.hypot(coord[0] - existing_coord[0], coord[1] - existing_coord[1]) < 1:
+                    return idx
+            idx = len(self.nodes)
+            self.nodes.append(coord)
+            coord_to_index[coord] = idx
+            return idx
+
+        tile_corner_lists = []
+
         for tile in self.tiles:
-            # Compute 6 corner points
-            corners = []
+            # Get all 6 corners of the hex
+            corner_indices = []
             for i in range(6):
-                ang = math.radians(60 * i - 30)
-                pt = (tile.position[0] + HEX_RADIUS*math.cos(ang),
-                      tile.position[1] + HEX_RADIUS*math.sin(ang))
-                corners.append(pt)
-            # Add each corner if not duplicate
-            for c in corners:
-                if all(math.hypot(c[0]-n[0], c[1]-n[1]) > 1 for n in self.nodes):
-                    self.nodes.append(c)
-            # Add midpoints of each edge
+                angle = math.radians(60 * i - 30)
+                x = tile.position[0] + HEX_RADIUS * math.cos(angle)
+                y = tile.position[1] + HEX_RADIUS * math.sin(angle)
+                idx = get_or_create_node((x, y))
+                corner_indices.append(idx)
+            tile_corner_lists.append(corner_indices)
+
+            # Add edges and adjacency between corner indices
             for i in range(6):
-                a, b = corners[i], corners[(i+1)%6]
-                mid = ((a[0]+b[0])/2, (a[1]+b[1])/2)
-                if all(math.hypot(mid[0]-e[0], mid[1]-e[1]) > 1 for e in self.edges):
-                    self.edges.append(mid)
+                a = corner_indices[i]
+                b = corner_indices[(i + 1) % 6]
+
+                # Bidirectional adjacency
+                self.node_adjacency.setdefault(a, set()).add(b)
+                self.node_adjacency.setdefault(b, set()).add(a)
+
+                # Add midpoint for road placement
+                midpoint = (
+                    (self.nodes[a][0] + self.nodes[b][0]) / 2,
+                    (self.nodes[a][1] + self.nodes[b][1]) / 2
+                )
+                if all(math.hypot(midpoint[0] - e[0], midpoint[1] - e[1]) > 1 for e in self.edges):
+                    self.edges.append(midpoint)
+
+        # --- Sort node list (top to bottom, then left to right)
+        sorted_nodes = sorted(enumerate(self.nodes), key=lambda pair: (round(pair[1][1]), round(pair[1][0])))
+        old_to_new_index = {old: new for new, (old, _) in enumerate(sorted_nodes)}
+        self.nodes = [coord for _, coord in sorted_nodes]
+
+        # --- Remap adjacency
+        new_adjacency = {}
+        for old_idx, neighbors in self.node_adjacency.items():
+            new_idx = old_to_new_index[old_idx]
+            new_adjacency[new_idx] = {old_to_new_index[n] for n in neighbors}
+        self.node_adjacency = new_adjacency
+
+        # --- Remap edge positions
+        new_edges = []
+        for edge in self.edges:
+            new_edges.append(edge)
+        self.edges = new_edges
+
+        # --- Debug output
+        print("[DEBUG] Node Adjacency List:")
+        for node_index, neighbors in sorted(self.node_adjacency.items()):
+            print(f"[DEBUG] Node {node_index} adjacent to: {sorted(neighbors)}")
+
+        print(f"[DEBUG] Total Nodes: {len(self.nodes)}, Total Edges: {len(self.edges)}")
+
+
 
 class Player:
     """
@@ -251,8 +300,18 @@ class Game:
             self.btn_rect[n] = pygame.Rect(x, y, w, h)
 
     def is_valid_settlement(self, player, node_index):
-        # TODO: Add logic to prevent building next to existing settlements
-        # and require road connection after setup phase
+        print(f"[DEBUG] Checking node {node_index}, adjacent: {self.board.node_adjacency.get(node_index)}")
+        print(f"[DEBUG] Existing settlements at: {list(self.node_ownership.keys())}")
+        # Can't place on an already occupied node
+        if self.node_ownership.get(node_index):
+            return False
+
+        # Check adjacent nodes using current ownership
+        for neighbor in self.board.node_adjacency.get(node_index, []):
+            owner = self.node_ownership.get(neighbor)
+            if owner and owner[1] in ('settlement', 'city'):
+                return False
+
         return True
 
     def is_valid_road(self, player, edge_index):
@@ -408,6 +467,7 @@ class Game:
         idx = min(range(len(self.pos_nodes)), key=lambda i: math.hypot(pt[0] - self.pos_nodes[i][0], pt[1] - self.pos_nodes[i][1]))
         dist = math.hypot(pt[0] - self.pos_nodes[idx][0], pt[1] - self.pos_nodes[idx][1])
         print(f"[DEBUG] Closest node is {idx} at distance {dist}")
+        print(f"[DEBUG] Selected node {idx} has neighbors: {self.board.node_adjacency.get(idx)}")
 
         if dist > SNAP_THRESHOLD:
             print(f"[DEBUG] Too far from node. Not placing.")
@@ -598,22 +658,42 @@ class Game:
                 if st=='settlement': pygame.draw.circle(self.screen,p.color,(int(x),int(y)),10)
                 elif st=='city': pygame.draw.rect(self.screen,p.color,pygame.Rect(x-10,y-10,20,20))
         # === Draw ghost previews ===
-        if self.build_mode in ['road', 'settle', 'upgrade']:
+        if self.build_mode in ['road', 'settle', 'upgrade'] or self.phase == 'setup':
             if self.build_mode == 'road':
                 for i, (x, y) in enumerate(self.pos_edges):
                     if i not in self.edge_ownership:
                         pygame.draw.line(self.screen, COLOR_GHOST, (x - 15, y), (x + 15, y), 4)
 
             elif self.build_mode == 'settle':
+                # Draw black circles on all disallowed spots due to adjacency
+                disallowed = set()
+                for idx in self.node_ownership:
+                    for neighbor in self.board.node_adjacency.get(idx, []):
+                        if neighbor not in self.node_ownership:
+                            disallowed.add(neighbor)
+
+                # Draw disallowed spots in black
+                for i in disallowed:
+                    x, y = self.pos_nodes[i]
+                    pygame.draw.circle(self.screen, (0, 0, 0), (int(x), int(y)), 10, 1)
+
+                # Then draw allowed ghost spots
+                p = self.players[self.selected_player]
                 for i, (x, y) in enumerate(self.pos_nodes):
-                    if i not in self.node_ownership:
+                    if self.is_valid_settlement(p, i):
                         pygame.draw.circle(self.screen, COLOR_GHOST, (int(x), int(y)), 10)
+
 
             elif self.build_mode == 'upgrade':
                 for i, (x, y) in enumerate(self.pos_nodes):
                     p = self.players[self.selected_player]
                     if p.node_states[i] == "settlement":
                         pygame.draw.rect(self.screen, COLOR_GHOST, pygame.Rect(x - 10, y - 10, 20, 20))
+
+        # Draw node index labels for debugging
+        for i, (x, y) in enumerate(self.pos_nodes):
+            label = self.font.render(str(i), True, (0, 0, 0))
+            self.screen.blit(label, (x + 8, y + 8))  # Offset so it doesn't overlap the circle
 
     def current_player(self):
         return self.players[self.current_turn % self.num_players]
