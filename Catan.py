@@ -284,6 +284,7 @@ class Game:
         self.phase = 'setup'  # Track whether in initial placement or regular game
         self.setup_step = 0  # Tracks progress through setup phase (settlement and road)
         self.robber_tile_index = None  # Track robber location
+        self.setup_resource_popup = None  # Tuple of (player_name, list of resources, frame_timer)
         print("[Game] Board reshuffled")
         print("[Setup] Entering setup phase")
         print(f"[Setup] {self.players[self.setup_player_index()].name} to place settlement")
@@ -512,7 +513,10 @@ class Game:
                     for tile in tiles:
                         if tile.resource != Resource.DESERT:
                             player.resources[tile.resource] += 1
-                    print(f"[Setup] {player.name} received starting resources: {[tile.resource.name for tile in tiles if tile.resource != Resource.DESERT]}")
+                    resources_granted = [tile.resource.name.title() for tile in tiles if tile.resource != Resource.DESERT]
+                    print(f"[Setup] {player.name} received starting resources: {resources_granted}")
+                    self.setup_resource_popup = (player.name, resources_granted, 3*30)  # Show for ~3 seconds at 30 FPS
+
             
             else:
                 # Road placement
@@ -580,6 +584,22 @@ class Game:
                     print(f"{self.log_prefix()} upgraded settlement to city at node {i}")
                     break
 
+    def draw_setup_popup(self):
+        if self.setup_resource_popup:
+            name, resources, frames_left = self.setup_resource_popup
+            if frames_left <= 0:
+                self.setup_resource_popup = None
+                return
+            self.setup_resource_popup = (name, resources, frames_left - 1)
+
+            msg = f"{name} receives: " + ", ".join(resources)
+            surf = self.title_font.render(msg, True, (0, 0, 0))
+            bg_rect = pygame.Rect(0, 0, surf.get_width() + 20, surf.get_height() + 10)
+            bg_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 160)
+
+            pygame.draw.rect(self.screen, (255, 255, 220), bg_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), bg_rect, 2)
+            self.screen.blit(surf, surf.get_rect(center=bg_rect.center))
 
     def setup_player_index(self):
         placements_per_player = 2
@@ -853,6 +873,7 @@ class Game:
                 instruction = f"{next_player.name}, place your {next_action}"
                 text_surface = self.font.render(instruction, True, (0, 0, 0))
                 self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
+            self.draw_setup_popup()
             pygame.display.flip(); self.clock.tick(30)
         pygame.quit(); sys.exit()
 
