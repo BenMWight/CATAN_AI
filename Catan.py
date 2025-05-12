@@ -11,7 +11,7 @@ BOARD_ORIGIN = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)  # Center of the board
 SNAP_THRESHOLD = 45  # Pixel distance threshold for snapping clicks to nodes/edges
 
 # ---Debugging ---
-SHOW_NODE_IDS = True
+SHOW_NODE_IDS = False
 
 # --- Colors ---
 COLOR_BG = (245, 222, 179)  # Background sand/beige
@@ -224,15 +224,31 @@ class Board:
             self.harbours.append(Harbour((dock_x, dock_y), trade_type, angle, [i, j]))
 
 
-    def draw(self, screen):
-        """Draws all hex tiles on provided screen."""
+    def draw(self, screen, game):
+        # Draw tiles
         for tile in self.tiles:
             tile.draw(screen)
+
+        # Draw harbours
         for harbour in self.harbours:
             harbour.draw(screen)
             for idx in harbour.node_indices:
                 if 0 <= idx < len(self.nodes):
                     pygame.draw.line(screen, (0, 0, 255), harbour.position, self.nodes[idx], 2)
+
+        # Safely draw the robber
+        if game.robber_tile_index is not None:
+            if 0 <= game.robber_tile_index < len(self.tiles):
+                try:
+                    robber_tile = self.tiles[game.robber_tile_index]
+                    pygame.draw.circle(screen, (0, 0, 0), (int(robber_tile.position[0]), int(robber_tile.position[1])), 20)
+                    #print(f"[Robber] Drawing robber at tile {game.robber_tile_index}")
+                except Exception as e:
+                    print(f"[ERROR] Drawing robber failed: {e}")
+            else:
+                print(f"[WARNING] Skipped drawing robber: Invalid index {game.robber_tile_index}")
+
+
 
     def compute_graph(self):
         self.nodes = []
@@ -372,6 +388,8 @@ class Game:
         # Whether the roll dice button is active
         self.roll_active = True
         self.show_node_ids = SHOW_NODE_IDS # Show node IDs for debugging; toggle this as needed
+        # Robber
+        self.robber_mode = False  # Waiting for player to click a tile
         # Fonts
         self.font = pygame.font.SysFont(None, 24)
         self.title_font = pygame.font.SysFont(None, 28)
@@ -470,13 +488,14 @@ class Game:
     def handle_roll(self):
         self.dice_result = random.randint(1, 6) + random.randint(1, 6)
         if self.dice_result == 7:
-            self.handle_robber()
+            pass
         else:
             self.distribute_resources()
 
     def handle_robber(self):
-        # TODO: Implement discard logic and robber placement
-        print("[Robber] Rolled 7: implement discard and move robber")
+        print("[Robber] Entering robber placement mode")
+        self.robber_mode = True
+        self.ui_popup_message = ("Click a tile to move the robber", 180)
 
     def play_card(self, lbl):
         # Existing dev card logic...
@@ -907,6 +926,11 @@ class Game:
         self.roll_active = False
         print(f"[Game] Dice rolled: {self.dice_result}")
 
+        if self.phase == "game":
+            if self.dice_result == 7:
+                self.handle_robber()
+                return  # Skip resource distribution
+
         if self.phase == "game" and self.dice_result != 7:
             popup_log = []
 
@@ -928,125 +952,147 @@ class Game:
     def run(self):
         """Main loop: handle events, update game, and render each frame."""
         running=True
-        while running:
-            for ev in pygame.event.get():
-                if ev.type==pygame.QUIT: running=False
-                elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-                    pt = ev.pos
-                    print(f"[DEBUG] Mouse click at {pt}")
+        try:
+            while running:
+                for ev in pygame.event.get():
+                    if ev.type==pygame.QUIT: running=False
+                    elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                        pt = ev.pos
+                        print(f"[DEBUG] Mouse click at {pt}")
 
-                    # Handle UI buttons
-                    clicked_ui = False
-                    for name, rect in self.btn_rect.items():
-                        if rect.collidepoint(pt):
-                            print(f"[DEBUG] Clicked button '{name}'")
-                            clicked_ui = True
-                            if name == 'reshuffle':
-                                self.board.generate_board()
-                                self.board.compute_graph()
-                                self.pos_nodes = sorted(self.board.nodes, key=lambda p: (p[1], p[0]))
-                                self.pos_edges = sorted(self.board.edges, key=lambda p: (p[1], p[0]))
-                                print("[Game] Board reshuffled")
-                                print(f"[DEBUG] Reloaded {len(self.pos_nodes)} nodes and {len(self.pos_edges)} edges")
-                            elif name == 'clear':
-                                self.clear_board()
-                            elif name == 'road':
-                                self.build_mode = 'road'
-                                print(f"{self.log_prefix()} Mode: Road")
-                            elif name == 'settle':
-                                self.build_mode = 'settle'
-                                print(f"{self.log_prefix()} Mode: Settle")
-                            elif name == 'upgrade':
-                                self.build_mode = 'upgrade'
-                                print(f"{self.log_prefix()} Mode: Upgrade")
-                            elif name == 'buy':
-                                self.buy()
-                            elif name in ['dec', 'inc']:
-                                self.ui_popup_message = ("Changing player count is not available mid-game.", 180)
-                            break  # only break if we hit something
+                        # Handle UI buttons
+                        clicked_ui = False
+                        for name, rect in self.btn_rect.items():
+                            if rect.collidepoint(pt):
+                                print(f"[DEBUG] Clicked button '{name}'")
+                                clicked_ui = True
+                                if name == 'reshuffle':
+                                    self.board.generate_board()
+                                    self.board.compute_graph()
+                                    self.pos_nodes = sorted(self.board.nodes, key=lambda p: (p[1], p[0]))
+                                    self.pos_edges = sorted(self.board.edges, key=lambda p: (p[1], p[0]))
+                                    print("[Game] Board reshuffled")
+                                    print(f"[DEBUG] Reloaded {len(self.pos_nodes)} nodes and {len(self.pos_edges)} edges")
+                                elif name == 'clear':
+                                    self.clear_board()
+                                elif name == 'road':
+                                    self.build_mode = 'road'
+                                    print(f"{self.log_prefix()} Mode: Road")
+                                elif name == 'settle':
+                                    self.build_mode = 'settle'
+                                    print(f"{self.log_prefix()} Mode: Settle")
+                                elif name == 'upgrade':
+                                    self.build_mode = 'upgrade'
+                                    print(f"{self.log_prefix()} Mode: Upgrade")
+                                elif name == 'buy':
+                                    self.buy()
+                                elif name in ['dec', 'inc']:
+                                    self.ui_popup_message = ("Changing player count is not available mid-game.", 180)
+                                break  # only break if we hit something
 
-                    if not clicked_ui:
-                        print(f"[DEBUG] not clicked_ui")
-                        # Roll button
-                        if self.roll_rect.collidepoint(pt):
-                            print("[DEBUG] Clicked roll button")
-                            if self.roll_active and self.phase != 'setup':
-                                self.next_turn()
-                                self.dice_result = random.randint(1, 6) + random.randint(1, 6)
-                                self.roll_dice()
-                                print(f"{self.log_prefix()} Rolled {self.dice_result}")
-                            elif (not self.roll_active) and self.phase != 'setup':
-                                self.roll_active = True
-                                print("[DEBUG] Skip trading and placements for now.")
-                                ### TODO
+                        if not clicked_ui:
+                            print(f"[DEBUG] not clicked_ui")
+                            # Roll button
+                            if self.roll_rect.collidepoint(pt):
+                                print("[DEBUG] Clicked roll button")
+                                if self.roll_active and self.phase != 'setup':
+                                    self.next_turn()
+                                    self.dice_result = random.randint(1, 6) + random.randint(1, 6)
+                                    self.roll_dice()
+                                    print(f"{self.log_prefix()} Rolled {self.dice_result}")
+                                elif (not self.roll_active) and self.phase != 'setup':
+                                    self.roll_active = True
+                                    print("[DEBUG] Skip trading and placements for now.")
+                                    ### TODO
+                                else:
+                                    print("[DEBUG] Roll ignored (setup phase or inactive)")
+                            
+                            # Player stats panel click
+                            elif any(r.collidepoint(pt) for r in self.stats_rects):
+                                print("[DEBUG] Clicked player stats panel")
+                                for i, r in enumerate(self.stats_rects):
+                                    if r.collidepoint(pt):
+                                        self.selected_player = i
+                                        print(f"[Game] Selected {self.players[i].name}")
+                                        break
+
+                            # Play development cards
+                            elif self.phase == 'main' and self.play_buttons:
+                                print("[DEBUG] Check DEV cards")
+                                for lbl, (btn, play) in self.play_buttons.items():
+                                    if btn.collidepoint(pt):
+                                        print(f"[DEBUG] Clicked dev card: {lbl}")
+                                        if play:
+                                            self.play_card(lbl)
+                                        else:
+                                            print(f"{self.log_prefix()} Cannot play {lbl} yet")
+                                        break
+
+                            # Not a UI element: treat as board click
                             else:
-                                print("[DEBUG] Roll ignored (setup phase or inactive)")
-                        
-                        # Player stats panel click
-                        elif any(r.collidepoint(pt) for r in self.stats_rects):
-                            print("[DEBUG] Clicked player stats panel")
-                            for i, r in enumerate(self.stats_rects):
-                                if r.collidepoint(pt):
-                                    self.selected_player = i
-                                    print(f"[Game] Selected {self.players[i].name}")
-                                    break
+                                if self.robber_mode:
+                                    for i, tile in enumerate(self.board.tiles):
+                                        if math.hypot(pt[0] - tile.position[0], pt[1] - tile.position[1]) < HEX_RADIUS:
+                                            if i == self.robber_tile_index:
+                                                print("[Robber] Cannot place robber on same tile")
+                                                break
+                                            if i >= len(self.board.tiles):
+                                                print(f"[ERROR] Invalid robber tile index: {i}")
+                                                break
+                                            self.robber_tile_index = i
+                                            self.robber_mode = False
+                                            self.ui_popup_message = ("Robber placed", 90)
+                                            print(f"[Robber] Robber moved to tile {i}")
+                                            break
+                                print("[DEBUG] Attempting board piece placement")
+                                self.place_piece(pt)
 
-                        # Play development cards
-                        elif self.phase == 'main' and self.play_buttons:
-                            print("[DEBUG] Check DEV cards")
-                            for lbl, (btn, play) in self.play_buttons.items():
-                                if btn.collidepoint(pt):
-                                    print(f"[DEBUG] Clicked dev card: {lbl}")
-                                    if play:
-                                        self.play_card(lbl)
-                                    else:
-                                        print(f"{self.log_prefix()} Cannot play {lbl} yet")
-                                    break
+                # Render everything
+                self.screen.fill(COLOR_BG)
+                self.board.draw(self.screen, self)
+                self.draw_placements()
+                self.draw_player_stats()
+                self.draw_selected_info()
+                # Draw UI and roll button
+                for name,label in [('reshuffle','Reshuffle'),('clear','Clear'),('road','Road'),('settle','Settle'),('upgrade','Upgrade'),('buy','Buy')]:
+                    r=self.btn_rect[name]
+                    bg=COLOR_ACTIVE_BUTTON_BG if self.build_mode==name else COLOR_BUTTON
+                    br=COLOR_ACTIVE_BUTTON_BORDER if self.build_mode==name else COLOR_LINE
+                    pygame.draw.rect(self.screen,bg,r); pygame.draw.rect(self.screen,br,r,2)
+                    txt=self.font.render(label,True,COLOR_BUTTON_TEXT)
+                    self.screen.blit(txt,txt.get_rect(center=r.center))
+                for name,label in [('dec','-'),('inc','+')]:
+                    r=self.btn_rect[name]
+                    pygame.draw.rect(self.screen,COLOR_BUTTON,r); pygame.draw.rect(self.screen,COLOR_LINE,r,2)
+                    self.screen.blit(self.font.render(label,True,COLOR_BUTTON_TEXT), self.font.render(label,True,COLOR_BUTTON_TEXT).get_rect(center=r.center))
+                active = self.roll_active and self.phase != 'setup'
+                pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BG if self.roll_active else COLOR_BUTTON,self.roll_rect)
+                pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BORDER if self.roll_active else COLOR_LINE,self.roll_rect,3)
+                rd=self.font.render("Roll Dice",True,COLOR_BUTTON_TEXT)
+                self.screen.blit(rd,rd.get_rect(center=self.roll_rect.center))
+                if self.dice_result is not None:
+                    dr=self.font.render(f"Total: {self.dice_result}",True,COLOR_BUTTON_TEXT)
+                    self.screen.blit(dr,dr.get_rect(midbottom=(self.roll_rect.centerx,self.roll_rect.top-10)))
+                self.draw_setup_popup()
+                # Show setup phase instructions
+                if self.phase == 'setup':
+                    next_player = self.players[self.setup_player_index()]
+                    next_action = "settlement" if self.setup_step % 2 == 0 else "road"
+                    instruction = f"{next_player.name}, place your {next_action}"
+                    text_surface = self.font.render(instruction, True, (0, 0, 0))
+                    self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
+                self.draw_setup_popup()
+                pygame.display.flip()
+                self.draw_ui_popup()
+                self.clock.tick(30)
 
-                        # Not a UI element: treat as board click
-                        else:
-                            print("[DEBUG] Attempting board piece placement")
-                            self.place_piece(pt)
-
-            # Render everything
-            self.screen.fill(COLOR_BG)
-            self.board.draw(self.screen)
-            self.draw_placements()
-            self.draw_player_stats()
-            self.draw_selected_info()
-            # Draw UI and roll button
-            for name,label in [('reshuffle','Reshuffle'),('clear','Clear'),('road','Road'),('settle','Settle'),('upgrade','Upgrade'),('buy','Buy')]:
-                r=self.btn_rect[name]
-                bg=COLOR_ACTIVE_BUTTON_BG if self.build_mode==name else COLOR_BUTTON
-                br=COLOR_ACTIVE_BUTTON_BORDER if self.build_mode==name else COLOR_LINE
-                pygame.draw.rect(self.screen,bg,r); pygame.draw.rect(self.screen,br,r,2)
-                txt=self.font.render(label,True,COLOR_BUTTON_TEXT)
-                self.screen.blit(txt,txt.get_rect(center=r.center))
-            for name,label in [('dec','-'),('inc','+')]:
-                r=self.btn_rect[name]
-                pygame.draw.rect(self.screen,COLOR_BUTTON,r); pygame.draw.rect(self.screen,COLOR_LINE,r,2)
-                self.screen.blit(self.font.render(label,True,COLOR_BUTTON_TEXT), self.font.render(label,True,COLOR_BUTTON_TEXT).get_rect(center=r.center))
-            active = self.roll_active and self.phase != 'setup'
-            pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BG if self.roll_active else COLOR_BUTTON,self.roll_rect)
-            pygame.draw.rect(self.screen,COLOR_ACTIVE_BUTTON_BORDER if self.roll_active else COLOR_LINE,self.roll_rect,3)
-            rd=self.font.render("Roll Dice",True,COLOR_BUTTON_TEXT)
-            self.screen.blit(rd,rd.get_rect(center=self.roll_rect.center))
-            if self.dice_result is not None:
-                dr=self.font.render(f"Total: {self.dice_result}",True,COLOR_BUTTON_TEXT)
-                self.screen.blit(dr,dr.get_rect(midbottom=(self.roll_rect.centerx,self.roll_rect.top-10)))
-            self.draw_setup_popup()
-            # Show setup phase instructions
-            if self.phase == 'setup':
-                next_player = self.players[self.setup_player_index()]
-                next_action = "settlement" if self.setup_step % 2 == 0 else "road"
-                instruction = f"{next_player.name}, place your {next_action}"
-                text_surface = self.font.render(instruction, True, (0, 0, 0))
-                self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
-            self.draw_setup_popup()
-            pygame.display.flip()
-            self.draw_ui_popup()
-            self.clock.tick(30)
-        pygame.quit(); sys.exit()
+            pygame.quit(); sys.exit()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[CRITICAL ERROR] {e}")
+            pygame.quit()
+            sys.exit()
 
 if __name__ == "__main__":
     Game(num_players=3).run()
