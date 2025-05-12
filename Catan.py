@@ -619,13 +619,30 @@ class Game:
         print(f"{self.log_prefix()} bought {card}")
 
     def play_card(self, lbl):
-        """Play a bought dev card if eligible and log."""
+        """Play a bought dev card if eligible and perform action."""
         p = self.players[self.selected_player]
         for t in p.dev_cards[lbl]:
             if t < self.current_turn:
                 p.dev_cards[lbl].remove(t)
                 print(f"{self.log_prefix()} played {lbl}")
+
+                # Perform action based on card
+                if lbl == "Knight":
+                    self.handle_robber()
+                elif lbl == "Road Building":
+                    # TODO: Implement 2 free roads
+                    print("[DEV] Road Building effect not yet implemented.")
+                elif lbl == "Monopoly":
+                    # TODO: Implement Monopoly effect
+                    print("[DEV] Monopoly effect not yet implemented.")
+                elif lbl == "Year of Plenty":
+                    # TODO: Implement Year of Plenty
+                    print("[DEV] Year of Plenty effect not yet implemented.")
+                # Victory Point has no effect
+
                 break
+        else:
+            print(f"{self.log_prefix()} Cannot play {lbl} yet")
 
     def place_piece(self, pt):
         print(f"[DEBUG] Clicked at {pt}")
@@ -874,6 +891,10 @@ class Game:
                     pygame.draw.rect(self.screen,clr,btn,2)
                     self.play_buttons[s]=(btn,playable)
             x+=spacing
+        player_name = p.name
+        name_surf = self.title_font.render(f"Viewing: {player_name}", True, (0, 0, 0))
+        name_rect = name_surf.get_rect(bottomleft=(10, SCREEN_HEIGHT - 10))
+        self.screen.blit(name_surf, name_rect)
 
     def draw_placements(self):
         """Render roads, settlements, and cities from state arrays."""
@@ -1013,14 +1034,54 @@ class Game:
                                 break  # only break if we hit something
 
                         if not clicked_ui:
+                            # === Robber tile selection (takes priority) ===
+                            if self.robber_mode:
+                                for i, tile in enumerate(self.board.tiles):
+                                    if math.hypot(pt[0] - tile.position[0], pt[1] - tile.position[1]) < HEX_RADIUS:
+                                        if i == self.robber_tile_index:
+                                            print("[Robber] Cannot place robber on same tile")
+                                            break
+                                        if i >= len(self.board.tiles):
+                                            print(f"[ERROR] Invalid robber tile index: {i}")
+                                            break
+                                        self.robber_tile_index = i
+                                        self.robber_mode = False
+
+                                        # Determine players on adjacent nodes
+                                        adjacent_nodes = self.get_adjacent_nodes(self.board.tiles[i])
+                                        victims = set()
+                                        for node in adjacent_nodes:
+                                            owner = self.node_ownership.get(node)
+                                            if owner:
+                                                player_id, structure = owner
+                                                if player_id != self.current_player().id:
+                                                    victims.add(player_id)
+
+                                        if victims:
+                                            if len(victims) == 1:
+                                                victim_id = list(victims)[0]
+                                                self.steal_resource_from(victim_id)
+                                            else:
+                                                self.pending_robber_victims = list(victims)
+                                                self.ui_popup_message = ("Click a player to steal from", 180)
+                                                print(f"[Robber] Waiting for target selection among: {[self.players[v].name for v in victims]}")
+                                        else:
+                                            print("[Robber] No players to steal from")
+
+                                        print(f"[Robber] Robber moved to tile {i}")
+                                        break  # 🔁 Exit early to avoid overlapping clicks
+
+                            # === Robber victim selection ===
                             if self.pending_robber_victims:
                                 for i in self.pending_robber_victims:
                                     if self.stats_rects[i].collidepoint(pt):
                                         print(f"[Robber] Clicked to steal from {self.players[i].name}")
                                         self.steal_resource_from(i)
-                                        break # Prevent placing roads/settlements etc
+                                        break
+
                             print(f"[DEBUG] not clicked_ui")
-                            # Roll button
+
+                            # === Roll Dice button ===
                             if self.roll_rect.collidepoint(pt):
                                 print("[DEBUG] Clicked roll button")
                                 if self.roll_active and self.phase != 'setup':
@@ -1031,18 +1092,10 @@ class Game:
                                 elif (not self.roll_active) and self.phase != 'setup':
                                     self.roll_active = True
                                     print("[DEBUG] Skip trading and placements for now.")
-                                    ### TODO
                                 else:
                                     print("[DEBUG] Roll ignored (setup phase or inactive)")
-                            
-                                # Player stats panel click
-                                if self.pending_robber_victims:
-                                    for i in self.pending_robber_victims:
-                                        if self.stats_rects[i].collidepoint(pt):
-                                            print(f"[Robber] Clicked to steal from {self.players[i].name}")
-                                            self.steal_resource_from(i)
-                                            return
-                                        
+
+                            # === Player stats panel (change selected player) ===
                             elif any(r.collidepoint(pt) for r in self.stats_rects):
                                 print("[DEBUG] Clicked player stats panel")
                                 for i, r in enumerate(self.stats_rects):
@@ -1051,8 +1104,8 @@ class Game:
                                         print(f"[Game] Selected {self.players[i].name}")
                                         break
 
-                            # Play development cards
-                            elif self.phase == 'main' and self.play_buttons:
+                            # === Development card click ===
+                            elif self.phase == 'game' and self.play_buttons:
                                 print("[DEBUG] Check DEV cards")
                                 for lbl, (btn, play) in self.play_buttons.items():
                                     if btn.collidepoint(pt):
@@ -1063,47 +1116,11 @@ class Game:
                                             print(f"{self.log_prefix()} Cannot play {lbl} yet")
                                         break
 
-                            # Not a UI element: treat as board click
+                            # === Default board piece placement ===
                             else:
-                                if self.robber_mode:
-                                    for i, tile in enumerate(self.board.tiles):
-                                        if math.hypot(pt[0] - tile.position[0], pt[1] - tile.position[1]) < HEX_RADIUS:
-                                            if i == self.robber_tile_index:
-                                                print("[Robber] Cannot place robber on same tile")
-                                                break
-                                            if i >= len(self.board.tiles):
-                                                print(f"[ERROR] Invalid robber tile index: {i}")
-                                                break
-                                            self.robber_tile_index = i
-                                            self.robber_mode = False
-
-                                            # Determine players on adjacent nodes
-                                            adjacent_nodes = self.get_adjacent_nodes(self.board.tiles[i])
-                                            victims = set()
-                                            for node in adjacent_nodes:
-                                                owner = self.node_ownership.get(node)
-                                                if owner:
-                                                    player_id, structure = owner
-                                                    if player_id != self.current_player().id:
-                                                        victims.add(player_id)
-
-                                            if victims:
-                                                if len(victims) == 1:
-                                                    # Steal immediately if only one player to steal from
-                                                    victim_id = list(victims)[0]
-                                                    self.steal_resource_from(victim_id)
-                                                else:
-                                                    # Wait for player to click who to steal from
-                                                    self.pending_robber_victims = list(victims)
-                                                    self.ui_popup_message = ("Click a player to steal from", 180)
-                                                    print(f"[Robber] Waiting for target selection among: {[self.players[v].name for v in victims]}")
-                                            else:
-                                                print("[Robber] No players to steal from")
-
-                                            print(f"[Robber] Robber moved to tile {i}")
-                                            break
                                 print("[DEBUG] Attempting board piece placement")
                                 self.place_piece(pt)
+
 
                 # Render everything
                 self.screen.fill(COLOR_BG)
