@@ -7,6 +7,42 @@ A simplified version of the board game *Catan* implemented using Python and Pyga
 
 ---
 
+## ✅ New Features Added 12/05/25
+
+### 🧙 Knight Development Card Support
+- **Knight card now playable** from the dev card bar.
+- Playing a Knight:
+  - Triggers robber mode.
+  - Lets player select a tile to move the robber.
+  - Steals a card from adjacent players.
+- Fixed bug where `play_card()` was overwritten and didn’t execute effects.
+- Updated click detection to allow Knight use during `self.phase == 'game'` (was incorrectly checking for `'main'`).
+
+### 🦹 Robber Placement & Stealing Logic
+- **Robber mode fully implemented**:
+  - Triggered by rolling a 7 or playing a Knight.
+  - Prompts player to click a tile to move the robber.
+  - Robber is drawn as a black circle on the selected tile.
+- **Card stealing**:
+  - Automatically steals a random resource from an adjacent player.
+  - If multiple valid victims, prompts player to choose by clicking their stat panel.
+- **Click routing fixes**:
+  - Robber tile placement is now prioritized and cannot be blocked by dev card or stat panel clicks.
+  - Prevents crashes from invalid `robber_tile_index`.
+
+### 👤 Player Selection Display
+- Bottom-left HUD now shows:
+  - `Viewing: <PlayerName>` indicating which player’s stats/resources you are looking at.
+- Updates dynamically when a player stat panel is clicked.
+
+### 🛠️ Input Handling Fixes (Robber Flow)
+- **Click priority order updated**:
+  - Robber tile click → victim click → dev card click → roll → stats → board.
+  - Ensures clicks are routed correctly during robber phase.
+- Added `return`/`break` control flow to prevent fallthrough into piece placement during robber interaction.
+
+---
+
 ## ✅ New Features Added 11/05/25
 
 ### 🌊 Harbour System Introduced
