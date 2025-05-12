@@ -390,6 +390,7 @@ class Game:
         self.show_node_ids = SHOW_NODE_IDS # Show node IDs for debugging; toggle this as needed
         # Robber
         self.robber_mode = False  # Waiting for player to click a tile
+        self.pending_robber_victims = None  # List of (player_id, node_index)
         # Fonts
         self.font = pygame.font.SysFont(None, 24)
         self.title_font = pygame.font.SysFont(None, 28)
@@ -557,6 +558,26 @@ class Game:
 
     def is_active_player(self, player_id):
         return player_id == (self.current_turn % self.num_players)
+    
+    def steal_resource_from(self, victim_id):
+        victim = self.players[victim_id]
+        current = self.current_player()
+
+        stealable = []
+        for res, count in victim.resources.items():
+            stealable += [res] * count
+
+        if stealable:
+            stolen = random.choice(stealable)
+            victim.resources[stolen] -= 1
+            current.resources[stolen] += 1
+            self.ui_popup_message = (f"Stole 1 {stolen.name.title()} from {victim.name}", 120)
+            print(f"[Robber] {current.name} stole 1 {stolen.name.title()} from {victim.name}")
+        else:
+            self.ui_popup_message = (f"{victim.name} had no cards to steal", 90)
+            print(f"[Robber] {victim.name} had no cards to steal")
+        
+        self.pending_robber_victims = None
 
     def setup_players(self):
         """Assign names, colors, and initialize state arrays for each player."""
@@ -749,7 +770,7 @@ class Game:
             pygame.draw.rect(self.screen, (0, 0, 0), bg_rect, 2)
             self.screen.blit(surf, surf.get_rect(center=bg_rect.center))
 
-    def draw_ui_popup(self):  # ✅ Insert it here
+    def draw_ui_popup(self):
         if self.ui_popup_message:
             text, frames_left = self.ui_popup_message
             if frames_left <= 0:
@@ -757,12 +778,13 @@ class Game:
                 return
             self.ui_popup_message = (text, frames_left - 1)
 
-            surf = self.font.render(text, True, (0, 0, 0))
-            bg_rect = pygame.Rect(0, 0, surf.get_width() + 20, surf.get_height() + 10)
-            bg_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 190)
+            font = pygame.font.SysFont(None, 36)
+            surf = font.render(text, True, (0, 0, 0))
+            bg_rect = pygame.Rect(0, 0, surf.get_width() + 40, surf.get_height() + 20)
+            bg_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 120)
 
-            pygame.draw.rect(self.screen, (255, 220, 220), bg_rect)
-            pygame.draw.rect(self.screen, (150, 0, 0), bg_rect, 2)
+            pygame.draw.rect(self.screen, (255, 200, 200), bg_rect)
+            pygame.draw.rect(self.screen, (200, 0, 0), bg_rect, 3)
             self.screen.blit(surf, surf.get_rect(center=bg_rect.center))
 
     def setup_player_index(self):
@@ -991,6 +1013,12 @@ class Game:
                                 break  # only break if we hit something
 
                         if not clicked_ui:
+                            if self.pending_robber_victims:
+                                for i in self.pending_robber_victims:
+                                    if self.stats_rects[i].collidepoint(pt):
+                                        print(f"[Robber] Clicked to steal from {self.players[i].name}")
+                                        self.steal_resource_from(i)
+                                        break # Prevent placing roads/settlements etc
                             print(f"[DEBUG] not clicked_ui")
                             # Roll button
                             if self.roll_rect.collidepoint(pt):
@@ -1007,7 +1035,14 @@ class Game:
                                 else:
                                     print("[DEBUG] Roll ignored (setup phase or inactive)")
                             
-                            # Player stats panel click
+                                # Player stats panel click
+                                if self.pending_robber_victims:
+                                    for i in self.pending_robber_victims:
+                                        if self.stats_rects[i].collidepoint(pt):
+                                            print(f"[Robber] Clicked to steal from {self.players[i].name}")
+                                            self.steal_resource_from(i)
+                                            return
+                                        
                             elif any(r.collidepoint(pt) for r in self.stats_rects):
                                 print("[DEBUG] Clicked player stats panel")
                                 for i, r in enumerate(self.stats_rects):
@@ -1041,7 +1076,30 @@ class Game:
                                                 break
                                             self.robber_tile_index = i
                                             self.robber_mode = False
-                                            self.ui_popup_message = ("Robber placed", 90)
+
+                                            # Determine players on adjacent nodes
+                                            adjacent_nodes = self.get_adjacent_nodes(self.board.tiles[i])
+                                            victims = set()
+                                            for node in adjacent_nodes:
+                                                owner = self.node_ownership.get(node)
+                                                if owner:
+                                                    player_id, structure = owner
+                                                    if player_id != self.current_player().id:
+                                                        victims.add(player_id)
+
+                                            if victims:
+                                                if len(victims) == 1:
+                                                    # Steal immediately if only one player to steal from
+                                                    victim_id = list(victims)[0]
+                                                    self.steal_resource_from(victim_id)
+                                                else:
+                                                    # Wait for player to click who to steal from
+                                                    self.pending_robber_victims = list(victims)
+                                                    self.ui_popup_message = ("Click a player to steal from", 180)
+                                                    print(f"[Robber] Waiting for target selection among: {[self.players[v].name for v in victims]}")
+                                            else:
+                                                print("[Robber] No players to steal from")
+
                                             print(f"[Robber] Robber moved to tile {i}")
                                             break
                                 print("[DEBUG] Attempting board piece placement")
@@ -1082,8 +1140,8 @@ class Game:
                     text_surface = self.font.render(instruction, True, (0, 0, 0))
                     self.screen.blit(text_surface, (20, SCREEN_HEIGHT - 120))
                 self.draw_setup_popup()
-                pygame.display.flip()
                 self.draw_ui_popup()
+                pygame.display.flip()
                 self.clock.tick(30)
 
             pygame.quit(); sys.exit()
